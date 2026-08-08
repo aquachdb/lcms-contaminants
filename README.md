@@ -60,6 +60,12 @@ searches ±10 ppm. Supplying the **B+1 m/z** is the single most useful extra
 input — it fixes the charge state for any *z*, and its exact mass identifies the
 element.
 
+The tool assumes an accurate mass by default. If you are on a single quad,
+triple quad or ion trap, switch **Instrument resolution** to *unit* under
+Refine: matching then uses a fixed ±0.5 Da window however precisely you type,
+and isotope offsets stop naming elements — ¹³C and ⁵³Cr are 3 mDa apart, which
+such an instrument cannot separate, so the tool reports the ambiguity instead.
+
 There are also tabs for **matching a whole peak list** (homologous series are
 grouped, so a blank full of PEG collapses to one line) and for **explaining a
 mass difference** between two peaks.
