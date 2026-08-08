@@ -11,7 +11,8 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SITE = os.path.join(ROOT, "site")
+# in this repository the app lives at the root, not in a site/ subdirectory
+SITE = ROOT if os.path.exists(os.path.join(ROOT, "index.html")) else os.path.join(ROOT, "site")
 
 fails = []
 

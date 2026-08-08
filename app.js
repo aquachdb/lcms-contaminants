@@ -1151,8 +1151,13 @@ function showCards(hits, headline) {
 function libraryCard(hit) {
   const r = hit.r, c = el('div', 'card ' + r[F.pol]);
   const top = el('div', 'card-top');
-  top.append(el('span', 'card-mz', fmt(r[F.mz])));
+  // A source that published a nominal integer mass must never be rendered to
+  // four decimals: "45.0000" for formate reads as an exact mass but is 40 ppm
+  // from the true 44.9982, which would falsify the site's central claim.
+  const nominal = F.basis != null && r[F.basis] === 'nominal';
+  top.append(el('span', 'card-mz', nominal ? '~' + Math.round(r[F.mz]) : fmt(r[F.mz])));
   top.append(el('span', 'card-name', r[F.name]));
+  if (nominal) top.append(chip('nominal mass only', 'warn'));
   c.append(top);
   const chips = el('div', 'chips');
   chips.append(chip(r[F.pol] === 'pos' ? 'positive' : 'negative', 'pol-' + r[F.pol]));
@@ -1289,7 +1294,12 @@ function renderExplanations(obs, res) {
 
 function run() {
   const q = parseBasePeak($('q').value);
-  location.hash = $('q').value ? encodeURIComponent($('q').value) : '';
+  // replaceState, not assignment: assigning to location.hash pushes a new
+  // history entry on every debounced keystroke, so Back stopped working.
+  try {
+    history.replaceState(null, '',
+      $('q').value ? '#' + encodeURIComponent($('q').value) : location.pathname);
+  } catch (e) { /* file:// and some embeds disallow this; harmless */ }
   updateBadges();
 
   if (q.kind === 'empty') { $('status').textContent = ''; $('parseHint').textContent =

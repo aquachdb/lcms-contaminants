@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LC-MS Contaminant Finder — identify background ions by m/z</title>
-<meta name="description" content="Type an m/z and find out which known LC-MS contaminant it matches. 4,800 background ions from plasticizers, siloxanes, PEG, surfactants, solvents and labware. Free, and runs entirely in your browser.">
+<meta name="description" content="Type an m/z and find out which known LC-MS contaminant it matches. 4,973 background ions from plasticizers, siloxanes, PEG, surfactants, solvents, labware, column bleed and metal corrosion. Free, and runs entirely in your browser.">
 <link rel="canonical" href="https://aquachdb.github.io/lcms-contaminants/">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="website">
 <meta property="og:title" content="LC-MS Contaminant Finder — identify background ions by m/z">
-<meta property="og:description" content="Type an m/z and see which known contaminant it matches. 4,800 ions aggregated from published contaminant lists, vendor tables and spectral databases.">
+<meta property="og:description" content="Type an m/z and see which known contaminant it matches. 4,973 ions aggregated from published contaminant lists, vendor tables and spectral databases.">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <script type="application/ld+json">
@@ -236,8 +236,8 @@
     </div>
   </section>
 
-  <section id="results" aria-live="polite">
-    <div id="status" class="status">Loading contaminant data…</div>
+  <section id="results">
+    <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Loading contaminant data…</div>
     <div id="cards"></div>
   </section>
 
