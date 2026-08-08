@@ -125,6 +125,18 @@
             <p class="micro" id="tolExplain">Auto reads your decimals: <code>371</code> → ±0.5 Da, <code>371.10</code> → ±0.01, <code>371.1012</code> → ±10 ppm.</p>
           </div>
           <div class="field">
+            <label for="resolution">Instrument resolution</label>
+            <select id="resolution">
+              <option value="high" selected>High resolution — Orbitrap, TOF, FT-ICR</option>
+              <option value="unit">Unit resolution — single quad, triple quad, ion trap</option>
+            </select>
+            <p class="micro" id="resExplain">On a unit-resolution instrument an accurate mass is not
+              available, so matching falls back to ±0.5 Da on the nominal mass and the isotope offsets
+              (¹³C at +1.0034 vs ⁵³Cr at +1.0001) can no longer be told apart — those are 3 mDa
+              apart and your instrument cannot resolve them. Expect many more candidates; use
+              retention time, the isotope ratio and the ladder spacing to choose between them.</p>
+          </div>
+          <div class="field">
             <label for="polarity">Polarity</label>
             <select id="polarity">
               <option value="">Any</option>

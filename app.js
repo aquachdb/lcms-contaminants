@@ -267,10 +267,19 @@ function parseBasePeak(raw) {
 
 // Auto tolerance mirrors how precisely the user typed: "371" means "somewhere
 // near 371", "371.1012" means "this exact mass".
+function unitResolution() {
+  const el = $('resolution');
+  return !!el && el.value === 'unit';
+}
+
 function toleranceFor(mz, decimals) {
   const mode = $('tolMode').value;
   if (mode === 'ppm') return mz * (parseFloat($('tolValue').value) || 10) / 1e6;
   if (mode === 'da') return parseFloat($('tolValue').value) || 0.01;
+  // A quadrupole or ion trap reports a nominal mass. Honouring typed decimals
+  // there would pretend to an accuracy the instrument cannot deliver, so unit
+  // mode fixes the window at half a Dalton however precisely the user types.
+  if (unitResolution()) return 0.5;
   const byDec = { 0: 0.5, 1: 0.05, 2: 0.01, 3: 0.005 };
   if (decimals in byDec) return byDec[decimals];
   return Math.max(mz * 10 / 1e6, 0.002);
@@ -290,6 +299,11 @@ function toleranceFor(mz, decimals) {
 // certainty. Where the window is too wide to separate candidates, the caller
 // keeps every survivor and reports the ambiguity rather than picking one.
 function isoOffsetTol(obs, mz, decimals) {
+  // Unit resolution cannot separate 13C (+1.00336) from 53Cr (+1.00014); they
+  // are 3 mDa apart. Widening to half a Dalton makes every A+1 nuclide a hit,
+  // which is the honest outcome -- the caller then reports the ambiguity rather
+  // than naming an element the instrument could not have distinguished.
+  if (unitResolution()) return 0.5;
   const byDec = { 0: 0.5, 1: 0.05, 2: 0.01, 3: 0.005 };
   const typed = (decimals in byDec) ? byDec[decimals] : 0.001;
   return Math.max(typed, (mz || 100) * 5 / 1e6, 0.0005);
@@ -1638,7 +1652,7 @@ function init() {
   $('runList').onclick = runPeakList;
   $('runDelta').onclick = runDelta;
 
-  ['tolMode', 'tolValue', 'polarity', 'category', 'sortBy', 'onlyMs2', 'onlyMulti',
+  ['tolMode', 'tolValue', 'resolution', 'polarity', 'category', 'sortBy', 'onlyMs2', 'onlyMulti',
    'charge', 'isoPreset', 'isoM1', 'isoM2', 'elution', 'requireLogp',
    'b1mz', 'b1pct', 'b2mz', 'b2pct', 'belowB0', 'rtMin']
     .forEach(id => $(id).addEventListener('change', () => {

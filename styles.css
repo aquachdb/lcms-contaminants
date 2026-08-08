@@ -231,6 +231,57 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
 .delta-inputs input:focus { outline: none; border-color: var(--accent); }
 .delta-inputs .or { color: var(--muted); font-size: .85rem; }
 
+/* ---------- mobile ----------
+   The browser draws its own clear button inside type=search, which sat right
+   next to ours and read as two identical controls. */
+#q::-webkit-search-cancel-button,
+#q::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 14px; }
+
+  /* tabs were wrapping to two lines each; keep them on one row and let the
+     row scroll rather than reflowing the whole header */
+  .tabs {
+    flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    margin: 0 -14px 12px; padding: 0 14px 2px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; font-size: .82rem; padding: 9px 12px; }
+
+  .header-inner { padding: 10px 14px; }
+  h1 { font-size: 1rem; }
+  .tagline { font-size: .78rem; }
+  .brand-mark { font-size: 22px; }
+  .search-panel { padding: 14px; margin: 14px 0 16px; }
+  #q { font-size: 1.1rem; padding: 12px 13px; }
+
+  /* 13px checkboxes and 23px summaries are unusable with a thumb; the WCAG
+     target is 44px, met here by padding rather than by scaling the control */
+  .check { min-height: 44px; align-items: center; margin-top: 2px; }
+  .check input[type="checkbox"] { width: 20px; height: 20px; flex: 0 0 20px; }
+  .drawer summary { min-height: 44px; display: flex; align-items: center; }
+  .field select, .field input[type="number"] { min-height: 44px; font-size: 16px; }
+  .primary-btn, .ghost-btn { min-height: 44px; }
+  .solvent-grid { grid-template-columns: 1fr 1fr; }
+
+  .card { padding: 12px 13px; }
+  .card-mz { font-size: 1.08rem; }
+  .card-name { font-size: .95rem; min-width: 100%; }
+  .about p, .site-footer p { font-size: .88rem; }
+  .iso-row { flex-wrap: wrap; }
+  .iso-row input { min-width: 44%; }
+
+  /* the per-result disclosure and the ladder jump links are the two controls a
+     user taps most on a phone, and both were ~21px tall */
+  .card details summary { min-height: 44px; display: flex; align-items: center; }
+  .ladder-link {
+    display: inline-block; min-height: 44px; line-height: 44px;
+    padding: 0 4px; margin-right: 4px;
+  }
+}
+
 @media (max-width: 560px) {
   #q { font-size: 1.1rem; }
   .detail-grid div { grid-template-columns: 1fr; gap: 2px; }
