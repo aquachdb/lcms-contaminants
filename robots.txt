@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aquachdb.github.io/lcms-contaminants/sitemap.xml

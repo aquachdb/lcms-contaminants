@@ -1,0 +1,103 @@
+name: "Report where a contaminant came from"
+description: "You traced a background ion to its source. This is the most valuable contribution to this project."
+title: "[source] m/z "
+labels: ["contaminant-source", "community-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Why this matters.** Existing databases tell you *what* an ion is. Almost none tell you
+        *where it came from*. Tracing a siloxane to a spent carbon filter on a nitrogen generator
+        can take weeks — and that knowledge currently lives only in the head of whoever found it.
+
+        You do not need to fill in every field. The m/z, the polarity and the source are enough.
+
+  - type: input
+    id: mz
+    attributes:
+      label: "m/z"
+      description: "As accurately as you have it."
+      placeholder: "371.1012"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: polarity
+    attributes:
+      label: Polarity
+      options: ["positive", "negative", "both"]
+    validations:
+      required: true
+
+  - type: input
+    id: charge
+    attributes:
+      label: Charge state
+      placeholder: "1"
+
+  - type: input
+    id: identity
+    attributes:
+      label: What is it?
+      description: "If you know. Leave blank if it is still unidentified — an unidentified ion with a known source is still useful."
+      placeholder: "Decamethylcyclopentasiloxane (D5)"
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Where did it come from?
+      description: "Be as specific as you can. Brand and part number if you have them."
+      placeholder: "Spent activated-carbon filter in the nitrogen generator feeding the ESI source."
+    validations:
+      required: true
+
+  - type: textarea
+    id: how_confirmed
+    attributes:
+      label: How did you confirm it?
+      description: "What made you certain? Swapping the part, a blank without it, MS2, retention time?"
+      placeholder: "Replaced the filter; the ion dropped by ~99% within two hours and has not returned."
+
+  - type: textarea
+    id: ruled_out
+    attributes:
+      label: What did you rule out first?
+      description: "One of the most useful fields here — it stops the next person repeating your search."
+      placeholder: "Solvents (three lots), mobile-phase additives, vials and septa, and the LC tubing."
+
+  - type: input
+    id: instrument
+    attributes:
+      label: Instrument and ion source
+      placeholder: "Orbitrap Exploris 240, heated ESI"
+
+  - type: input
+    id: chromatography
+    attributes:
+      label: Column and mobile phase
+      placeholder: "CSH C18; water/ACN with 0.1% formic acid"
+
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: How confident are you?
+      options:
+        - "Confirmed - I removed the source and the ion went away"
+        - "Strong - multiple lines of evidence"
+        - "Suspected - plausible but unproven"
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: "Retention behaviour, isotope pattern, MS2 fragments, when it appears, how to get rid of it."
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Licence
+      options:
+        - label: "I agree this report may be published under CC BY 4.0 with attribution to me."
+          required: true

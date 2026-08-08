@@ -1,0 +1,16 @@
+# Audit artefacts produced by the headless-Chrome harness
+_audit_shots/
+audit/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "LC-MS Contaminant Finder"
+message: "If you use this resource, please cite it and, where you rely on a specific entry, the original source recorded in that entry's reference field."
+type: dataset
+authors:
+  - family-names: Quach
+    given-names: Austin
+    email: austin.quach@daltonbioanalytics.com
+abstract: >-
+  A curated, exact-mass-validated compendium of LC-MS contaminant and background
+  ions, with a browser-based tool for identifying an unknown ion from its m/z,
+  charge state and isotope envelope. Every m/z is recomputed from its molecular
+  formula and adduct rather than transcribed. Coverage includes plasticizers,
+  cyclic siloxanes, polyethylene glycols and other polymer series, surfactants,
+  solvent and salt clusters, labware leachables, stationary-phase bleed and
+  metal corrosion products from LC flow paths. Entries carry provenance, the
+  homologous-series spacing where applicable, an MS1 specificity estimate, and
+  a flag for whether public MS2 spectra exist.
+keywords:
+  - mass spectrometry
+  - LC-MS
+  - contaminant
+  - background ion
+  - metabolomics
+  - proteomics
+  - blank
+  - column bleed
+license: CC-BY-4.0
+repository-code: "https://github.com/aquachdb/lcms-contaminants"
+url: "https://aquachdb.github.io/lcms-contaminants/"

@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LC-MS Contaminant Finder — identify background ions by m/z</title>
+<meta name="description" content="Type an m/z and find out which known LC-MS contaminant it matches. 4,800 background ions from plasticizers, siloxanes, PEG, surfactants, solvents and labware. Free, and runs entirely in your browser.">
+<link rel="canonical" href="https://aquachdb.github.io/lcms-contaminants/">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="LC-MS Contaminant Finder — identify background ions by m/z">
+<meta property="og:description" content="Type an m/z and see which known contaminant it matches. 4,800 ions aggregated from published contaminant lists, vendor tables and spectral databases.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Dataset",
+  "name": "LC-MS Contaminant Ion Database",
+  "description": "A curated, exact-mass-validated list of liquid chromatography-mass spectrometry contaminant and background ions, aggregated from peer-reviewed contaminant tables, instrument-vendor background ion lists, core-facility tables, spectral databases and code repositories.",
+  "keywords": ["LC-MS", "mass spectrometry", "contaminant", "background ion", "m/z", "plasticizer", "siloxane", "polyethylene glycol", "leachable", "metabolomics", "proteomics", "blank"],
+  "license": "https://creativecommons.org/licenses/by/4.0/",
+  "measurementTechnique": "Liquid chromatography-electrospray ionisation mass spectrometry"
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#results">Skip to results</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">🧪</span>
+      <div>
+        <h1>LC-MS Contaminant Finder</h1>
+        <p class="tagline">What is that peak in my blank?</p>
+      </div>
+    </div>
+    <button id="themeToggle" class="ghost-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">◐</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="tabs" role="tablist" aria-label="Search mode">
+    <button role="tab" id="tab-find" aria-controls="panel-find" aria-selected="true" class="tab active">Find an ion</button>
+    <button role="tab" id="tab-list" aria-controls="panel-list" aria-selected="false" class="tab">Peak list</button>
+    <button role="tab" id="tab-delta" aria-controls="panel-delta" aria-selected="false" class="tab">Explain a mass difference</button>
+  </div>
+
+  <section class="search-panel">
+
+    <!-- ============ 1. find an ion ============ -->
+    <div id="panel-find" role="tabpanel" aria-labelledby="tab-find">
+      <div class="search-row">
+        <input id="q" type="search" inputmode="decimal" autocomplete="off" autofocus
+               placeholder="371+"
+               aria-label="Base peak m/z with polarity and charge, compound name or formula">
+        <button id="clear" class="ghost-btn" type="button" aria-label="Clear search">✕</button>
+      </div>
+      <p class="hint" id="parseHint">Type the <strong>m/z of the tallest peak</strong> in the cluster, with polarity and
+        charge the way you already write it: <code>371+</code>, <code>371-</code>, <code>371 2+</code>,
+        <code>371(3+)</code>, <code>371 z=5</code>, <code>371++</code> or <code>[M+H]+ 371.1012</code>.
+        You can also search a name, formula or class.</p>
+
+      <details class="drawer" id="isoBlock">
+        <summary>Isotope peaks and context <span id="isoBadge" class="badge" hidden></span></summary>
+        <div class="filter-grid">
+          <div class="field">
+            <label>Peaks above your base peak</label>
+            <div class="iso-row">
+              <span class="iso-tag">B+1</span>
+              <input id="b1mz" type="number" step="0.0001" placeholder="m/z" aria-label="B plus 1 m/z">
+              <input id="b1pct" type="number" step="0.1" min="0" placeholder="% of B0" aria-label="B plus 1 percent of base peak">
+            </div>
+            <div class="iso-row">
+              <span class="iso-tag">B+2</span>
+              <input id="b2mz" type="number" step="0.0001" placeholder="m/z" aria-label="B plus 2 m/z">
+              <input id="b2pct" type="number" step="0.1" min="0" placeholder="% of B0" aria-label="B plus 2 percent of base peak">
+            </div>
+            <p class="micro"><strong>The B+1 m/z is the charge determinant</strong> — z = round(1.0034 ÷ (B+1 − B0)),
+              which works for every charge state, not just 2+. Its <em>exact</em> mass also names the element:
+              ¹³C, ²⁹Si, ³³S, ⁵³Cr and ⁵⁷Fe all sit at different offsets near +1.</p>
+          </div>
+          <div class="field">
+            <label>Below the base peak</label>
+            <label class="check"><input type="checkbox" id="belowB0"> Is there a peak below your tallest one?</label>
+            <p class="micro">⁵⁴Fe, ⁵⁰Cr, ¹⁰B and ⁶Li all put intensity <em>below</em> the base peak, and titanium puts it
+              on both sides. Metals are only called on the satellite <strong>pair</strong>, never on one peak alone.</p>
+            <label for="rtMin">Retention time (min, optional)</label>
+            <input id="rtMin" type="number" step="0.01" min="0" placeholder="e.g. 1.42">
+          </div>
+          <div class="field">
+            <label>Mobile phase flowing at that time</label>
+            <div id="solvents" class="solvent-grid">
+              <label class="check"><input type="checkbox" data-solvent="water" checked> water</label>
+              <label class="check"><input type="checkbox" data-solvent="acn" checked> acetonitrile</label>
+              <label class="check"><input type="checkbox" data-solvent="meoh" checked> methanol</label>
+              <label class="check"><input type="checkbox" data-solvent="ipa"> isopropanol</label>
+              <label class="check"><input type="checkbox" data-solvent="fa" checked> formic acid</label>
+              <label class="check"><input type="checkbox" data-solvent="aa" checked> acetic acid</label>
+              <label class="check"><input type="checkbox" data-solvent="amfo" checked> ammonium formate</label>
+              <label class="check"><input type="checkbox" data-solvent="amac" checked> ammonium acetate</label>
+              <label class="check"><input type="checkbox" data-solvent="tfa"> TFA</label>
+            </div>
+            <p class="micro">Cluster explanations are <em>computed</em> from exactly what you tick here — a list cannot
+              enumerate this space. Untick anything that was not flowing at your retention time.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="drawer" id="refine">
+        <summary>Refine <span id="refineBadge" class="badge" hidden></span></summary>
+        <div class="filter-grid">
+          <div class="field">
+            <label for="tolMode">Mass tolerance</label>
+            <div class="inline">
+              <select id="tolMode">
+                <option value="auto" selected>Auto</option>
+                <option value="ppm">ppm</option>
+                <option value="da">± Da</option>
+              </select>
+              <input id="tolValue" type="number" step="0.001" min="0" value="10" disabled aria-label="Tolerance value">
+            </div>
+            <p class="micro" id="tolExplain">Auto reads your decimals: <code>371</code> → ±0.5 Da, <code>371.10</code> → ±0.01, <code>371.1012</code> → ±10 ppm.</p>
+          </div>
+          <div class="field">
+            <label for="polarity">Polarity</label>
+            <select id="polarity">
+              <option value="">Any</option>
+              <option value="pos">Positive</option>
+              <option value="neg">Negative</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="category">Contaminant class</label>
+            <select id="category"><option value="">Any</option></select>
+          </div>
+          <div class="field">
+            <label for="sortBy">Rank by</label>
+            <select id="sortBy">
+              <option value="blend" selected>Best match (mass + how widely reported)</option>
+              <option value="mass">Closest mass first</option>
+              <option value="common">Most widely reported first</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Restrict to</label>
+            <label class="check"><input type="checkbox" id="onlyMulti"> Reported by more than one source</label>
+            <label class="check"><input type="checkbox" id="onlyMs2"> Has a public MS2 spectrum</label>
+          </div>
+          <div class="field"><button id="resetFilters" class="ghost-btn" type="button">Reset all</button></div>
+        </div>
+      </details>
+
+      <details class="drawer" id="more">
+        <summary>I know more about this peak <span id="moreBadge" class="badge" hidden></span></summary>
+        <div class="filter-grid">
+          <div class="field">
+            <label for="charge">Charge state</label>
+            <select id="charge">
+              <option value="">Any / unknown</option>
+              <option value="1">1 (isotopes 1.0034 apart)</option>
+              <option value="2">2 (isotopes 0.5017 apart)</option>
+              <option value="3">3 (isotopes 0.3345 apart)</option>
+              <option value="4">4 (isotopes 0.2508 apart)</option>
+              <option value="5">5 (isotopes 0.2007 apart)</option>
+              <option value="6">6 (isotopes 0.1672 apart)</option>
+              <option value="7">7 (isotopes 0.1433 apart)</option>
+              <option value="8">8 (isotopes 0.1254 apart)</option>
+            </select>
+            <p class="micro">Polymers and detergents routinely run above 2+ — the compendium holds entries up to 6.</p>
+          </div>
+          <div class="field">
+            <label for="isoPreset">Isotope envelope</label>
+            <select id="isoPreset">
+              <option value="">Any</option>
+              <option value="none">No big M+2 (&lt;3%) — no Cl/Br/S</option>
+              <option value="s">M+2 ≈ 4–8% — sulfur</option>
+              <option value="si">M+2 ≈ 10–25% — silicon (siloxane)</option>
+              <option value="cl1">M+2 ≈ 32% — one chlorine</option>
+              <option value="cl2">M+2 ≈ 65% — two chlorines</option>
+              <option value="br1">M+2 ≈ 97% — one bromine</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <div class="inline" id="isoCustom" hidden>
+              <input id="isoM2" type="number" step="0.1" min="0" placeholder="M+2 %" aria-label="Observed M+2 percent">
+              <input id="isoM1" type="number" step="0.1" min="0" placeholder="M+1 %" aria-label="Observed M+1 percent">
+            </div>
+            <p class="micro">M+1 ≈ 1.1% per carbon, so it estimates carbon count.</p>
+          </div>
+          <div class="field">
+            <label for="elution">Retention behaviour</label>
+            <select id="elution">
+              <option value="">Any</option>
+              <option value="very early">Very early (logP &lt; 0)</option>
+              <option value="early">Early (logP 0–2)</option>
+              <option value="mid">Mid gradient (logP 2–4)</option>
+              <option value="late">Late (logP 4–7)</option>
+              <option value="very late">Very late (logP &gt; 7)</option>
+            </select>
+            <p class="micro">XLogP as a rough reversed-phase proxy — a hint, not a prediction.</p>
+            <label class="check"><input type="checkbox" id="requireLogp"> Hide entries with no logP</label>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ============ 2. peak list ============ -->
+    <div id="panel-list" role="tabpanel" aria-labelledby="tab-list" hidden>
+      <label for="peaklist" class="sr-only">Peak list: one m/z per line, or CSV with m/z in the first column</label>
+      <textarea id="peaklist" rows="8" spellcheck="false"
+        aria-label="Peak list: one m/z per line, or CSV with m/z in the first column"
+        placeholder="Paste one m/z per line, or CSV with m/z in the first column:&#10;371.1012&#10;445.1200&#10;519.1388&#10;149.0233"></textarea>
+      <div class="row-actions">
+        <button id="runList" class="primary-btn" type="button">Find contaminants</button>
+        <button id="downloadList" class="ghost-btn" type="button" hidden>Download CSV</button>
+        <span class="privacy">🔒 Runs in your browser — nothing is uploaded.</span>
+      </div>
+      <p class="hint">Peaks belonging to the same homologous series are grouped together, so a blank full of PEG
+        collapses into one line instead of forty. Series are tested at <strong>spacing ÷ z for z = 1–4</strong>, so a
+        3+ PEG envelope stepping by 14.675 is still recognised as PEG.</p>
+    </div>
+
+    <!-- ============ 3. delta explainer ============ -->
+    <div id="panel-delta" role="tabpanel" aria-labelledby="tab-delta" hidden>
+      <div class="delta-inputs">
+        <input id="d1" type="number" step="0.0001" placeholder="m/z of peak 1" aria-label="First m/z">
+        <input id="d2" type="number" step="0.0001" placeholder="m/z of peak 2" aria-label="Second m/z">
+        <span class="or">or</span>
+        <input id="dDelta" type="number" step="0.0001" placeholder="the difference" aria-label="Mass difference">
+        <button id="runDelta" class="primary-btn" type="button">Explain</button>
+      </div>
+      <p class="hint">What does the gap between two peaks mean? This checks adduct differences, polymer repeat units,
+        isotope spacings and common neutral losses at once.</p>
+    </div>
+  </section>
+
+  <section id="results" aria-live="polite">
+    <div id="status" class="status">Loading contaminant data…</div>
+    <div id="cards"></div>
+  </section>
+
+  <section class="about">
+    <h2>How this works</h2>
+    <p>Enter the <em>m/z</em> of the peak you cannot explain — the <strong>tallest peak of the cluster</strong>, not the
+      one you think is monoisotopic. For iron the most abundant isotope is not the lightest, and past about ninety
+      carbons the ¹³C peak overtakes the ¹²C one, so "which peak is monoisotopic" is ambiguous exactly where it
+      matters. The tallest peak never is.</p>
+    <p>Four layers run in order, and every one of them reports its own evidence:
+      the <strong>library</strong> of <strong id="statIons">—</strong> known contaminant ions covering
+      <strong id="statCompounds">—</strong> compounds; <strong>mobile-phase clusters</strong> generated
+      combinatorially from the solvents you say were flowing; <strong>formula generation</strong> constrained by the
+      isotope peaks you measured; and <strong>companion logic</strong> — the sodiated partner, the cluster ladder, the
+      dimer, the water loss — which is what actually separates a molecule from a solvent cluster.</p>
+    <p>Isobaric alternatives are always shown side by side. Mass alone cannot separate trifluoroacetate from a sodium
+      formate cluster, and a tool that silently picks one is lying to you.</p>
+    <p class="privacy-note">🔒 Everything runs locally in your browser. Nothing you type or paste is sent anywhere,
+      which matters when peak lists are confidential.</p>
+    <h2>Why LC-MS contaminants matter</h2>
+    <p>Background ions from plastics, solvents, tubing and labware routinely dominate LC-MS blanks, suppress real
+      analytes and get mistaken for biological features. Tracing one to its source can take weeks — a siloxane at
+      <code>m/z 371.1012</code> might come from vial septa, ambient laboratory air, or a spent carbon filter on a
+      nitrogen generator. This tool exists to shorten that search.</p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>Aggregated from peer-reviewed contaminant tables, instrument-vendor background ion lists, core-facility
+       tables, spectral databases and public code repositories. Every m/z is recomputed from its molecular formula
+       and adduct rather than transcribed.</p>
+    <p class="micro">Data licensed CC BY 4.0. This gives identification <em>candidates</em>, not identifications —
+       confirm with retention time, isotope pattern or MS2.</p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
