@@ -187,7 +187,15 @@ async function load() {
 
     $('status').textContent = '';
     showWelcome();
-    if (location.hash.length > 1) { $('q').value = decodeURIComponent(location.hash.slice(1)); run(); }
+    if (location.hash.length > 1) {
+      // decodeURIComponent throws URIError on a stray '%'. Left uncaught inside
+      // the loader's try block it reported "could not load the data" on a
+      // perfectly loaded app.
+      let seed = '';
+      try { seed = decodeURIComponent(location.hash.slice(1)); }
+      catch (e) { seed = location.hash.slice(1); }
+      $('q').value = seed; run();
+    }
   } catch (e) {
     $('status').innerHTML = '<strong>Could not load the contaminant data.</strong> ' +
       'If you opened this file directly, serve the folder over HTTP instead ' +
@@ -937,10 +945,21 @@ const REPEATS = [
 function peakListValues() {
   const txt = ($('peaklist').value || '');
   const out = [];
-  txt.split(/[\r\n]+/).forEach(line => {
-    const m = line.match(/-?[0-9]*\.?[0-9]+/);
-    if (m) out.push(parseFloat(m[0]));
+  let rejected = 0;
+  txt.split(/[\r\n]+/).forEach(raw => {
+    const line = raw.trim();
+    if (!line) return;
+    // first column only: m/z then intensity is the usual export shape
+    let tok = line.split(/[,;\t]|\s{2,}/)[0].trim();
+    // 1,371.1012 -> 1371.1012, but only for genuine thousands grouping
+    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(line.trim())) tok = line.trim().replace(/,/g, '');
+    // whole token must be a number, optionally in scientific notation
+    if (!/^\+?\d*\.?\d+(?:[eE][+-]?\d+)?$/.test(tok)) { rejected++; return; }
+    const v = parseFloat(tok);
+    if (!isFinite(v) || v <= 0 || v > 100000) { rejected++; return; }
+    out.push(v);
   });
+  out.rejected = rejected;
   return out;
 }
 
