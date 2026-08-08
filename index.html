@@ -268,10 +268,23 @@
 <footer class="site-footer">
   <div class="wrap">
     <p>Aggregated from peer-reviewed contaminant tables, instrument-vendor background ion lists, core-facility
-       tables, spectral databases and public code repositories. Every m/z is recomputed from its molecular formula
-       and adduct rather than transcribed.</p>
-    <p class="micro">Data licensed CC BY 4.0. This gives identification <em>candidates</em>, not identifications —
-       confirm with retention time, isotope pattern or MS2.</p>
+       tables, spectral databases and public code repositories.
+       <strong>3,842 of 4,973 ions (77%)</strong> have their m/z recomputed here from a molecular formula and
+       adduct; 1,004 carry the value their source published, and 127 only a nominal integer mass. The last two
+       are labelled on every result, and the nominal ones are shown as <code>~45</code> rather than as an exact
+       mass. About 38% of entries rest on domain knowledge cross-checked against this literature rather than on
+       a single citable table.</p>
+    <p class="micro">
+       <a href="https://github.com/aquachdb/lcms-contaminants">Source, full dataset and issue tracker on GitHub</a> ·
+       <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/data/contaminants.tsv">Download the data (TSV)</a> ·
+       <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/ATTRIBUTION.md">Attribution</a> ·
+       <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/LICENSE-DATA.md">Licence</a> ·
+       <a href="https://github.com/aquachdb/lcms-contaminants/issues/new?template=contaminant-source.yml">Report a contaminant source</a>
+    </p>
+    <p class="micro">Compilation and computed annotations CC BY 4.0; upstream sources keep their own terms, and
+       every row carries its references in the TSV. This gives identification <em>candidates</em>, not
+       identifications — confirm with retention time, isotope pattern or MS2.
+       <span id="dataVersion"></span></p>
   </div>
 </footer>
 

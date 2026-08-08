@@ -13,11 +13,20 @@ matters when peak lists are confidential.
 
 ## What makes this different
 
-**Every *m/z* is computed, not transcribed.** Each entry carries a molecular
-formula and an adduct, and the mass is recalculated from them with the electron
-mass applied. This caught real errors in published tables — including widely
+**Masses are computed rather than transcribed — for 77% of the table, and the
+rest says so.** 3,842 of 4,973 ions carry a molecular formula and adduct, and
+their m/z is recalculated from those with the electron mass applied; independent
+audit found the maximum disagreement between stored and recomputed values to be
+5×10⁻⁵ Da, with none beyond 0.0001 Da. Of the remainder, 1,004 carry the value
+their source published and 127 only a nominal integer mass; both are labelled on
+every result, and nominal ones display as `~45` rather than as a false exact
+mass. Recomputation caught real errors in published tables — including widely
 quoted values that omit the electron mass, and a database whose DEHP entry is
 actually diisooctyl phthalate.
+
+About 38% of entries rest on domain knowledge cross-checked against this
+literature rather than on a single citable table. Treat this as a curated
+screening resource, not a validated reference standard.
 
 **It explains ions rather than just looking them up.** A curated list can only
 ever contain what someone thought to write down. Real blanks are dominated by

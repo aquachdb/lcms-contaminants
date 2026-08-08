@@ -9,6 +9,7 @@
 
 const F = {}; // field name -> column index, filled once data loads
 let ROWS = [], META = {}, LADDERS = [];
+let DATA_READY = false;   // never answer from an empty library
 
 const $ = id => document.getElementById(id);
 const el = (tag, cls, txt) => { const n = document.createElement(tag);
@@ -173,6 +174,7 @@ async function load() {
     const data = await res.json();
     data.fields.forEach((name, i) => F[name] = i);
     ROWS = data.rows; META = data.meta;
+    DATA_READY = ROWS.length > 0;
 
     $('statIons').textContent = META.n_ions.toLocaleString();
     $('statCompounds').textContent = META.n_compounds.toLocaleString();
@@ -245,7 +247,13 @@ function parseBasePeak(raw) {
     const m = rest.match(/^(\d+)\s*([+-])$/);
     z = parseInt(m[1], 10); pol = m[2] === '+' ? 'pos' : 'neg';
   } else if (/^(\+|-)\1*$/.test(rest)) {
-    z = rest.length; pol = rest.charAt(0) === '+' ? 'pos' : 'neg';
+    // A single sign states POLARITY only. Reading it as an explicit z=1
+    // suppressed charge inference, so "89.5069+" returned "no explanation
+    // found" while the identical "89.5069" correctly inferred 2+ -- and the
+    // welcome-screen example used the signed form.
+    // "++" / "+++" remain the old instrument shorthand for 2+ / 3+.
+    if (rest.length > 1) z = rest.length;
+    pol = rest.charAt(0) === '+' ? 'pos' : 'neg';
   } else if (/^(pos|positive|neg|negative)$/i.test(rest)) {
     pol = /^p/i.test(rest) ? 'pos' : 'neg';
   } else {
@@ -266,6 +274,25 @@ function toleranceFor(mz, decimals) {
   const byDec = { 0: 0.5, 1: 0.05, 2: 0.01, 3: 0.005 };
   if (decimals in byDec) return byDec[decimals];
   return Math.max(mz * 10 / 1e6, 0.002);
+}
+
+// Window for matching an observed isotope OFFSET to a specific nuclide.
+//
+// This was called but never defined, so entering any B+1 m/z threw a
+// ReferenceError that aborted the render and left the previous query's cards on
+// screen -- the app showed a confident answer for a different ion. The isotope
+// engine had therefore never executed in production.
+//
+// The offsets it must separate are only millidaltons apart (13C +1.00336,
+// 53Cr +1.00014, 57Fe +1.00046, 29Si +0.99957), so the window has to be tight.
+// But it can never be tighter than the precision the user actually typed:
+// claiming to resolve 3 mDa from a value given to 2 decimals would be inventing
+// certainty. Where the window is too wide to separate candidates, the caller
+// keeps every survivor and reports the ambiguity rather than picking one.
+function isoOffsetTol(obs, mz, decimals) {
+  const byDec = { 0: 0.5, 1: 0.05, 2: 0.01, 3: 0.005 };
+  const typed = (decimals in byDec) ? byDec[decimals] : 0.001;
+  return Math.max(typed, (mz || 100) * 5 / 1e6, 0.0005);
 }
 
 /* =========================================================== charge inference
@@ -560,9 +587,24 @@ function layerLibrary(obs, iso) {
     if ((r[F.nsrc] || 1) > 1 && r[F.ms1tier] === 'high') conf = 'high';
     else if ((r[F.nsrc] || 1) > 1 || r[F.conf] === 'high') conf = 'medium';
     if (cav.length) conf = conf === 'high' ? 'medium' : conf;
+    // A source's nominal value is not an exact mass and must not be shown as
+    // one, nor scored on a ppm error computed against it: m/z 45.0000 "formate"
+    // otherwise ranks first at +0.0 ppm while the true 44.9982 entry is
+    // labelled +40 ppm -- exactly inverted.
+    const basis = F.basis != null ? r[F.basis] : 'calc';
+    if (basis === 'nominal') {
+      cav.push('the source published only a nominal (integer) mass for this ion, ' +
+               'so the ppm figure is not meaningful and no exact mass is claimed');
+      conf = conf === 'high' ? 'medium' : conf;
+    } else if (basis === 'reported') {
+      cav.push('m/z as published by the source; we hold no formula for this ion, ' +
+               'so it has not been independently recomputed here');
+    }
     out.push({
       identity: r[F.name], species: r[F.adduct] || '', formula: r[F.formula] || '',
-      calc: r[F.mz], ppm: ppmOf(obs.mz, r[F.mz]), layer: 'library', confidence: conf,
+      calc: r[F.mz], basis: basis,
+      ppm: basis === 'nominal' ? null : ppmOf(obs.mz, r[F.mz]),
+      layer: 'library', confidence: conf,
       evidence: ev, caveats: cav, row: r,
       score: Math.abs(ppmOf(obs.mz, r[F.mz])) / Math.max(1, obs.ppmTol) - prominence(r)
     });
@@ -1029,7 +1071,7 @@ function layerCompanion(obs, iso) {
   if (!ev.length && !checks.length) return [];
   return [{
     identity: 'Companion evidence — what would settle this',
-    species: '', formula: '', calc: null, ppm: null, layer: 'companion',
+    species: '', formula: '', calc: null, basis: 'calc', ppm: null, layer: 'companion',
     confidence: ev.length ? 'medium' : 'low',
     evidence: ev.length ? ev : ['nothing in the Peak list tab matched a companion; paste your full peak list there and this layer will check for them automatically'],
     caveats: cav, checks: checks, score: 4
@@ -1061,7 +1103,10 @@ const LAYER_LABEL = { library: 'library', cluster: 'mobile-phase cluster',
 function explanationCard(x, obs) {
   const c = el('div', 'card exp exp-' + x.layer);
   const top = el('div', 'card-top');
-  top.append(el('span', 'card-mz', x.calc == null ? '—' : fmt(x.calc)));
+  const nom = x.basis === 'nominal';
+  top.append(el('span', 'card-mz',
+    x.calc == null ? '—' : (nom ? '~' + Math.round(x.calc) : fmt(x.calc))));
+  if (nom) top.append(chip('nominal mass only', 'warn'));
   top.append(el('span', 'card-name', x.identity));
   if (x.ppm != null) top.append(el('span', 'delta',
     (x.ppm >= 0 ? '+' : '') + x.ppm.toFixed(1) + ' ppm'));
@@ -1311,7 +1356,24 @@ function renderExplanations(obs, res) {
     : 'No explanation found for m/z ' + obs.mz + '.';
 }
 
+
+// A failed or stalled load must produce a refusal, not a confident negative.
+function libraryUnavailable() {
+  if (DATA_READY) return false;
+  const box = $('cards');
+  if (box) box.textContent = '';
+  const st = $('status');
+  if (st) {
+    st.innerHTML = '<strong>The contaminant library is not loaded, so no answer can be given.</strong> ' +
+      'Reload the page. Nothing here means &quot;not a contaminant&quot; \u2014 it means the data is missing.';
+  }
+  const dl = $('downloadList');
+  if (dl) dl.hidden = true;
+  return true;
+}
+
 function run() {
+  if (libraryUnavailable()) return;
   const q = parseBasePeak($('q').value);
   // replaceState, not assignment: assigning to location.hash pushes a new
   // history entry on every debounced keystroke, so Back stopped working.
@@ -1391,6 +1453,7 @@ function detectSeries(mzs) {
 }
 
 function runPeakList() {
+  if (libraryUnavailable()) return;
   const mzs = peakListValues();
   if (!mzs.length) { $('status').textContent = 'No numbers found in that list.'; return; }
 
