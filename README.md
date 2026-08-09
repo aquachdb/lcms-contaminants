@@ -117,13 +117,34 @@ See CONTRIBUTING.md.
 
 ```powershell
 python tools/test_mzcalc.py    # exact-mass engine — must report 0 failures
-python tools/check_site.py     # real JS parse + cross-file consistency
+python tools/check_site.py     # real JS parse, cross-file consistency, tools/ drift
 python -m http.server 8777     # then open http://127.0.0.1:8777
 python tools/audit_site.py     # drives headless Chrome against the live page
 ```
 
 `check_site.py` and `audit_site.py` exist because a build once shipped a page
 that loaded forever, caused by one missing parenthesis that no test executed.
+
+**`app.js`, `index.html` and `styles.css` are edited here** — this repository is
+where the web app is developed, not a deployment target for a copy kept
+elsewhere.
+
+**`tools/*.py` and `data/*` are generated; do not edit them in place.** Each file
+in `tools/` carries a header naming its source. They are produced from the
+private build pipeline, which also writes `data/contaminants.tsv`,
+`data/contaminants.json` and `data/SCHEMA.md` straight into this repository:
+
+```powershell
+python scripts/build_tables.py        # (in the pipeline) rebuild the master table
+python scripts/build_site_data.py     # writes data/ here — no copy step
+python scripts/sync_published.py      # regenerates tools/ here
+```
+
+A hand-edit in `tools/` is silently reverted by the next sync, so
+`tools/check_site.py` fails if any generated copy has drifted from its source.
+That check exists because the published engine once sat several commits behind
+the real one — publishing SDS cluster masses 222 Da too light, while the equally
+stale test suite shipped next to it reported "0 checks failed".
 
 ## Licence
 

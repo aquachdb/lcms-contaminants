@@ -1,3 +1,13 @@
+# =====================================================================
+# GENERATED FILE -- DO NOT EDIT IN PLACE.
+#
+# Source of truth : scripts/test_mzcalc.py
+# Regenerate with : python scripts/sync_published.py
+#
+# Edits made here are overwritten by the next sync and will fail the
+# drift check in `python tools/check_site.py`. Change the source file.
+# =====================================================================
+# --- generated header ends; everything below is verbatim source ---
 """Unit tests for mzcalc: formula parsing, adduct parsing, exact m/z.
 
 Reference m/z values are standard published monoisotopic values (4 dp).
@@ -136,6 +146,140 @@ check("[C2H6SiO]5 [M+H]+ is the D5 background ion",
       calc_mz("[C2H6SiO]5", "[M+H]+"), 371.1012)
 check_eq("[C2H6SiO]6 == C12H36O6Si6",
          parse_formula("[C2H6SiO]6"), parse_formula("C12H36O6Si6"))
+
+print("\n--- ion composition: the canonical identity of an ion ---")
+from mzcalc import canonical_adduct, hill_formula, ion_composition  # noqa: E402
+
+
+def ic(formula, adduct):
+    return ion_composition(formula, adduct)
+
+
+# the four spellings of the sodiated formic acid dimer that the table carried as
+# four separate rows -- including one with the whole cluster baked into the
+# "neutral" and an [M]- adduct
+FORMATE_CLUSTER = [
+    ("CH2O2", "[2M+Na-2H]-"),
+    ("CH2O2", "[M2+Na-2H]-"),
+    ("H2CO2", "[M2+Na-H2]-"),          # non-Hill neutral, loss written as H2
+    ("C2H2NaO4", "[M]-"),              # cluster baked into the neutral
+]
+first = ic(*FORMATE_CLUSTER[0])
+check_eq("sodium formate cluster resolves to C2H2NaO4 1-",
+         (first.formula, first.charge, first.sign), ("C2H2NaO4", 1, "-"))
+for f, a in FORMATE_CLUSTER[1:]:
+    check_eq("  %-12s %-14s is the same ion" % (f, a), ic(f, a), first)
+
+# 2M and M2 are the same multiplier, whichever side of M it is written
+check_eq("[2M+H]+ == [M2+H]+ (DMSO dimer)",
+         ic("C2H6OS", "[2M+H]+") == ic("C2H6OS", "[M2+H]+"), True)
+check_eq("[3M+Na]+ == [M3+Na]+", ic("C2H6OS", "[3M+Na]+") == ic("C2H6OS", "[M3+Na]+"), True)
+
+# the four spellings of PO3- that phosphoric acid was listed under
+PO3 = [("H3PO4", "[M-H2O-H]-"), ("H3PO4", "[M-H3O]-"), ("HPO3", "[M-H]-"), ("O3P", "[M]-")]
+po3 = ic(*PO3[0])
+check_eq("[M-H2O-H]- of phosphoric acid is O3P 1-",
+         (po3.formula, po3.charge, po3.sign), ("O3P", 1, "-"))
+for f, a in PO3[1:]:
+    check_eq("  %-8s %-12s is the same ion" % (f, a), ic(f, a), po3)
+
+# multiply-charged: charge is part of the identity, composition alone is not
+check_eq("[M+2H]2+ carries charge 2 and both protons",
+         (ic("C6H12O6", "[M+2H]2+").formula, ic("C6H12O6", "[M+2H]2+").charge),
+         ("C6H14O6", 2))
+check_eq("[M+2H]2+ is NOT the same ion as [M+2H]+ at half the mass",
+         ic("C6H12O6", "[M+2H]2+") == ic("C6H12O6", "[M+2H]+"), False)
+check_eq("[2M+2H]2+ is not the same ion as [M+H]+",
+         ic("C6H12O6", "[2M+2H]2+") == ic("C6H12O6", "[M+H]+"), False)
+
+# isotope-prefixed terms stay distinct pseudo-elements
+check_eq("[M+63Cu]+ composition keeps the mass number",
+         ic("C2H3N", "[M+63Cu]+").formula, "C2H3[63Cu]N")
+check_eq("63Cu and 65Cu adducts are different ions",
+         ic("C2H3N", "[M+63Cu]+") == ic("C2H3N", "[M+65Cu]+"), False)
+check_eq("63Cu adduct is not merged with natural-abundance Cu",
+         ic("C2H3N", "[M+63Cu]+") == ic("C2H3N", "[M+Cu]+"), False)
+check_eq("oxidation state is not iodine: [M+63Cu(I)]+ == [M+63Cu]+",
+         ic("C2H3N", "[M+63Cu(I)]+") == ic("C2H3N", "[M+63Cu]+"), True)
+check_eq("parenthesised loss group: [M-(H2O)2]+ == [M-2H2O]+",
+         ic("C6H12O6", "[M-(H2O)2+H]+") == ic("C6H12O6", "[M-2H2O+H]+"), True)
+
+# ---- THE NEGATIVE CONTROL -------------------------------------------------
+# Trifluoroacetate and the sodium formate cluster are both m/z 112.9856 in
+# negative mode. They are chemically different ions and MUST NOT merge. If this
+# test ever passes as "equal", the whole table has been corrupted into claiming
+# that mass can separate species -- which is the one thing it cannot do.
+tfa = ic("C2HF3O2", "[M-H]-")
+naform = ic("CH2O2", "[2M+Na-2H]-")
+check("trifluoroacetate m/z", calc_mz("C2HF3O2", "[M-H]-"), 112.9856)
+check("sodium formate cluster m/z", calc_mz("CH2O2", "[2M+Na-2H]-"), 112.9856)
+check_eq("...they agree to well under 1 mDa",
+         abs(calc_mz("C2HF3O2", "[M-H]-") - calc_mz("CH2O2", "[2M+Na-2H]-")) < 5e-4, True)
+check_eq("ISOBARIC BUT DIFFERENT: C2F3O2- vs C2H2NaO4- must NOT merge",
+         tfa == naform, False)
+check_eq("  trifluoroacetate composition", tfa.formula, "C2F3O2")
+check_eq("  sodium formate cluster composition", naform.formula, "C2H2NaO4")
+# The app's other worked example is NOT the same case and must not be treated
+# as one: protonated N-methylpyrrolidone and the acetone/acetonitrile cluster
+# have the SAME elemental composition (C5H10NO+), so they are one ion arising
+# from two sources -- exactly what the merge is meant to record -- not two ions.
+check_eq("N-methylpyrrolidone [M+H]+ IS composition-identical to the ACN/acetone cluster",
+         ic("C5H9NO", "[M+H]+") == ic("C3H6O", "[M+CH3CN+H]+"), True)
+check_eq("  ...and that composition is C5H10NO", ic("C5H9NO", "[M+H]+").formula, "C5H10NO")
+
+# None, never a guess
+check_eq("no formula -> None", ic("NA", "[M+H]+"), None)
+check_eq("unparsable adduct -> None", ic("C6H12O6", "M+H"), None)
+check_eq("unknown adduct term -> None", ic("C6H12O6", "[M+Zz]+"), None)
+check_eq("loss larger than the molecule -> None (a data error, not notation)",
+         ic("C2F3NaO2", "[M-H]-"), None)
+check_eq("untabulated isotope -> None", ic("C2H3N", "[M+64Cu]+"), None)
+
+print("\n--- Hill notation and canonical adduct notation ---")
+check_eq("Hill: carbon, hydrogen, then alphabetical",
+         hill_formula("O4SH2"), "H2O4S")
+check_eq("Hill: no carbon -> all alphabetical", hill_formula("PH3O4"), "H3O4P")
+check_eq("Hill: carbon first even when written last", hill_formula("H2CO2"), "CH2O2")
+
+CANON = [
+    ("[M2+Na-2H]-", "[2M+Na-2H]-"),      # multiplier moves in front of M
+    ("[M2+Na-H2]-", "[2M+Na-2H]-"),      # ...and a suffix count becomes a prefix
+    ("[2M+Na-2H]-", "[2M+Na-2H]-"),      # already canonical: unchanged
+    ("[M+H]+", "[M+H]+"),
+    ("[M+1H]1+", "[M+H]+"),              # redundant 1s dropped
+    ("[M+2H]2+", "[M+2H]2+"),            # real charge kept
+    ("[M+Na+CH3CN]+", "[M+CH3CN+Na]+"),  # charge carrier written last
+    ("[M+ACN+Na]+", "[M+CH3CN+Na]+"),    # shorthand normalised
+    ("[M+H+C3H7NO]+", "[M+DMF+H]+"),
+    ("[M+H+CH2O2]+", "[M+HCOOH+H]+"),
+    ("[M-H2O-H]-", "[M-H2O-H]-"),        # heaviest loss first
+    ("[M-H-H2O]-", "[M-H2O-H]-"),
+    ("[M-H2O+H]+", "[M+H-H2O]+"),        # additions before losses
+    ("[M+C2HF3O2-H]-", "[M+TFA-H]-"),
+    ("[M+TFA+TFA-H]-", "[M+2TFA-H]-"),   # repeats collapse into a count
+    ("[M+35Cl2]+", "[M+35Cl2]+"),        # isotope count stays a suffix
+    ("[M4-H3+Na4]+", "[4M+4Na-3H]+"),
+    ("[M+6H]6+", "[M+6H]6+"),            # a real multiplier, not an isotope
+    ("[M]-", "[M]-"),
+    ("[M]2-", "[M]2-"),
+]
+for src, want in CANON:
+    check_eq("canonical %-16s" % src, canonical_adduct(src), want)
+check_eq("unparsable adduct -> None", canonical_adduct("M+H"), None)
+
+# a notational normal form must never change the chemistry: every canonical
+# form re-parses to the same ion and the same m/z
+for src, _want in CANON:
+    got = canonical_adduct(src)
+    check_eq("round-trip composition %-16s" % src,
+             ion_composition("C6H12O6", got) == ion_composition("C6H12O6", src), True)
+    check_eq("round-trip m/z         %-16s" % src,
+             round(calc_mz("C6H12O6", got), 6) == round(calc_mz("C6H12O6", src), 6), True)
+
+# the SDS shorthand: parse_formula would otherwise read it as sulfur-deuterium-
+# sulfur, which is 222 Da light and a silently wrong ion
+check("SDS cluster [M+SDS-Na]- is the dimer, not S2D",
+      calc_mz("C12H25NaO4S", "[M+SDS-Na]-"), 553.2850)
 
 print("\n--- mass defect (nominal from formula, not from rounding m/z) ---")
 from mzcalc import mass_defect  # noqa: E402

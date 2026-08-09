@@ -129,7 +129,7 @@ Four columns hold the ion identity and what the merge preserved:
 | `alt_origins` | `;`-separated other reported `common_source` values |
 | `alt_adducts` | `;`-separated other adduct notations seen for it, qualified with the neutral they were written from when that differs (`[M]- of C2H2NaO4`) |
 
-`site/data/contaminants.json` (shipped as `data/contaminants.json`) is the columnar bundle the
+`data/contaminants.json` is the columnar bundle the
 web app loads. Shape:
 
 ```

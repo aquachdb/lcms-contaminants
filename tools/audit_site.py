@@ -1,3 +1,13 @@
+# =====================================================================
+# GENERATED FILE -- DO NOT EDIT IN PLACE.
+#
+# Source of truth : scripts/audit_site.py
+# Regenerate with : python scripts/sync_published.py
+#
+# Edits made here are overwritten by the next sync and will fail the
+# drift check in `python tools/check_site.py`. Change the source file.
+# =====================================================================
+# --- generated header ends; everything below is verbatim source ---
 """Headless-Chrome harness for auditing the contaminant finder before publishing.
 
 Drives the real installed Chrome through Playwright, so what is tested is what a
@@ -120,7 +130,12 @@ CASES = [
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8777)
-    ap.add_argument("--shots", default=os.path.join(ROOT, "site", "_audit_shots"))
+    # Opt-in, as the docstring above has always said. It used to default to
+    # site/_audit_shots, which no longer exists -- and since this file is also
+    # published as tools/audit_site.py, a directory default would have made a
+    # smoke run scatter PNGs into the clean public repo.
+    ap.add_argument("--shots", default=None,
+                    help="directory to write PNG screenshots into (default: none)")
     args = ap.parse_args()
 
     import re
