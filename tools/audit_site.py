@@ -1,13 +1,3 @@
-# =====================================================================
-# GENERATED FILE -- DO NOT EDIT IN PLACE.
-#
-# Source of truth : scripts/audit_site.py
-# Regenerate with : python scripts/sync_published.py
-#
-# Edits made here are overwritten by the next sync and will fail the
-# drift check in `python tools/check_site.py`. Change the source file.
-# =====================================================================
-# --- generated header ends; everything below is verbatim source ---
 """Headless-Chrome harness for auditing the contaminant finder before publishing.
 
 Drives the real installed Chrome through Playwright, so what is tested is what a

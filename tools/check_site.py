@@ -1,27 +1,14 @@
-# =====================================================================
-# GENERATED FILE -- DO NOT EDIT IN PLACE.
-#
-# Source of truth : scripts/check_site.py
-# Regenerate with : python scripts/sync_published.py
-#
-# Edits made here are overwritten by the next sync and will fail the
-# drift check in `python tools/check_site.py`. Change the source file.
-# =====================================================================
-# --- generated header ends; everything below is verbatim source ---
-"""Diagnostics for the static site: strict JSON validity, JS sanity, and drift.
+"""Diagnostics for the static site: strict JSON validity and JS sanity.
 
 JSON.parse in the browser is stricter than Python's json module -- Python happily
 writes NaN/Infinity, which the browser rejects outright and which would leave the
 page stuck on its loading message.
 
-This is the "is this repo OK to ship" gate, so it also verifies that the
-generated Python in tools/ still matches its source in the pipeline's scripts/.
-That check exists because the published mass engine once drifted eight commits
-behind without anyone noticing.
+This is the "is this repo OK to ship" gate. It needs nothing but this repository,
+so it runs in a fresh clone and in CI.
 
-  python tools/check_site.py                 # the repo this file ships in
-  python scripts/check_site.py --root DIR    # any site root
-  python scripts/check_site.py --no-drift    # skip the tools/ drift check
+  python tools/check_site.py               # the repo this file ships in
+  python tools/check_site.py --root DIR    # any other site root
 
 The site root is a PARAMETER, not a code difference. There used to be two forks
 of this file -- one assuming a site/ subdirectory, one assuming a flat repo root
@@ -42,67 +29,10 @@ PARENT = os.path.dirname(HERE)
 def default_site_root():
     """Where the app lives, if the caller did not say.
 
-    Published repo: this file is <repo>/tools/check_site.py and the app sits at
-    the repo root. Pipeline: this file is <pipeline>/scripts/check_site.py and
-    the pipeline holds no copy of the app at all, so fall back to the published
-    repo beside it.
+    This file is <repo>/tools/check_site.py and the app sits at the repo root --
+    the single copy of it, wherever the repo happens to be cloned.
     """
-    if os.path.exists(os.path.join(PARENT, "index.html")):
-        return PARENT
-    env = os.environ.get("LCMS_PUBLISHED_ROOT")
-    if env:
-        return env
-    return os.path.join(os.path.dirname(PARENT), "lcms-contaminants")
-
-
-def find_source_scripts(site_root):
-    """The pipeline's scripts/ directory, or None if this box does not have it.
-
-    The published repo is cloned by people who have no access to the private
-    pipeline tree, and CI runs without it too, so an absent source tree means
-    "cannot check", not "failed".
-    """
-    cands = []
-    env = os.environ.get("LCMS_PIPELINE_ROOT")
-    if env:
-        cands.append(os.path.join(env, "scripts"))
-    # running as the pipeline's own scripts/check_site.py
-    cands.append(HERE)
-    # published repo sitting beside the pipeline tree
-    cands.append(os.path.join(os.path.dirname(os.path.abspath(site_root)),
-                              "lcmsContaminants", "scripts"))
-    for c in cands:
-        if os.path.exists(os.path.join(c, "sync_published.py")):
-            return c
-    return None
-
-
-def drift_check(site_root, fails):
-    """Verify tools/*.py still match the scripts/ they were generated from."""
-    src_dir = find_source_scripts(site_root)
-    if src_dir is None:
-        print("  tools/ drift: SKIPPED (pipeline source tree not on this machine)")
-        return
-    # Point the sync module at THIS site root, so --root and the drift check can
-    # never disagree about which tools/ directory is under test.
-    os.environ["LCMS_PUBLISHED_ROOT"] = os.path.abspath(site_root)
-    sys.path.insert(0, src_dir)
-    try:
-        import sync_published
-    except ImportError as e:
-        print("  tools/ drift: SKIPPED (%s)" % e)
-        return
-    bad = []
-    for name, state, _src, _want in sync_published.status():
-        if state != "ok":
-            bad.append("%s (%s)" % (name, state))
-    print("  tools/ drift: %s" % ("OK -- %d file(s) match source" % len(sync_published.SYNCED_TOOLS)
-                                  if not bad else "DRIFTED"))
-    if bad:
-        for b in bad:
-            print("    %s" % b)
-        fails.append("published tools/ have drifted from scripts/: %s "
-                     "-- run `python scripts/sync_published.py`" % ", ".join(bad))
+    return PARENT
 
 
 def main():
@@ -110,8 +40,6 @@ def main():
     ap.add_argument("--root", default=default_site_root(),
                     help="site root holding index.html, app.js and data/ "
                          "(default: %(default)s)")
-    ap.add_argument("--no-drift", action="store_true",
-                    help="skip the tools/ generated-copy drift check")
     args = ap.parse_args()
 
     site = args.root
@@ -197,10 +125,6 @@ def main():
             print("    UNKNOWN: %s" % ", ".join(unknown))
             fails.append("app.js references data fields that do not exist: %s"
                          % ", ".join(unknown))
-
-    # ---- generated-copy drift ----
-    if not args.no_drift:
-        drift_check(site, fails)
 
     print()
     if fails:

@@ -39,19 +39,21 @@ the adduct and the mass follows; give only a mass and it cannot be validated.
 Fork, branch, pull request. Before submitting:
 
 ```powershell
-cd scripts
-python test_mzcalc.py        # exact-mass engine, must report 0 failures
-python build_tables.py       # rebuild the compendium, check the QC report
-python check_site.py         # real JS parse plus cross-file checks
-python audit_site.py         # drives headless Chrome against the live page
+python tools/test_mzcalc.py  # exact-mass engine, must report 0 failures
+python tools/check_site.py   # real JS parse plus cross-file checks
+python tools/audit_site.py   # drives headless Chrome against the live page
 ```
+
+Those three need nothing but this repository. Rebuilding the compendium itself
+(`build_tables.py`) happens in the private pipeline, which imports
+`tools/mzcalc.py` from here.
 
 `check_site.py` and `audit_site.py` exist because a release once shipped a page
 that loaded forever, caused by a single missing parenthesis that no test executed.
 Please do not skip them.
 
 Data contributions go in `parts/` (recalled or curated) or `web/` (extracted from
-a source), following the 18-column contract in `SCHEMA.md`. Corrections to existing
+a source), following the 18-column contract in `data/SCHEMA.md`. Corrections to existing
 rows go in `corrections.tsv` as an auditable overlay with a stated reason, rather
 than editing the source part files — that way every change stays reviewable.
 

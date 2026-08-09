@@ -1,13 +1,3 @@
-# =====================================================================
-# GENERATED FILE -- DO NOT EDIT IN PLACE.
-#
-# Source of truth : scripts/test_mzcalc.py
-# Regenerate with : python scripts/sync_published.py
-#
-# Edits made here are overwritten by the next sync and will fail the
-# drift check in `python tools/check_site.py`. Change the source file.
-# =====================================================================
-# --- generated header ends; everything below is verbatim source ---
 """Unit tests for mzcalc: formula parsing, adduct parsing, exact m/z.
 
 Reference m/z values are standard published monoisotopic values (4 dp).
