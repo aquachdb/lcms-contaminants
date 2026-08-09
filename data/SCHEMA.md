@@ -26,7 +26,7 @@ contaminant_name	synonyms	category	common_source	series_name	neutral_formula	rep
 | 13 | rt_behavior | Chromatographic behavior if known: `elutes late/lipophilic`, `void volume`, `ubiquitous across gradient`, `NA` |
 | 14 | notes | Diagnostic detail: characteristic fragments, spacing of the series (e.g. `44.0262 spacing`), when it appears, how to remove it |
 | 15 | source_type | `memory` for recalled entries, `web` for entries taken from a located source |
-| 16 | reference | For `web`: full URL, plus DOI/citation if a paper. For `memory`: `internal-knowledge` |
+| 16 | reference | For `web`: full URL, plus DOI/citation if a paper. For `memory`: `internal-knowledge`. **Never a local filesystem path** -- see below |
 | 17 | confidence | `high` / `medium` / `low` -- your confidence that this compound+adduct is a genuine, commonly observed LC-MS contaminant AND that the formula is right |
 | 18 | record_id | `<partname>-<sequential integer>`, e.g. `M1-001`. Must be unique within your file |
 
@@ -65,3 +65,54 @@ misc_background_ion
 - Only include species that are actually *observed as ions* in ESI/APCI LC-MS. Do not pad the list.
 - Prefer precision over volume, but be exhaustive within your assigned scope.
 - Do not invent formulas. If unsure of the formula, put `NA` and set confidence `low`.
+
+## Provenance rule: no local filesystem paths in `reference`
+
+A reference must be resolvable **by a reader of the published dataset**. A path such as
+`E:\...\manual\canez\ac3c05431_si_001.pdf` is not: it exposes the build machine's layout,
+nobody else can open it, and it advertises the publisher-copyrighted PDFs held under
+`manual/` that we may not redistribute. Cite the DOI/URL instead.
+
+`build_tables.py` enforces this rather than trusting it. `scrub_local_paths()` removes any
+Windows drive path, UNC path or unix system path from `reference` at load time and keeps the
+citation that normally follows it after a `|`. If stripping would leave nothing, it falls back
+in order to: the public locator for that file (`LOCAL_SOURCE_PUBLIC`), any DOI mentioned in the
+same field, then the literal marker
+`citation unresolved (local-only source, not redistributable)` -- it never silently blanks a
+row. Rows that reach that marker are flagged `reference_unresolved` in `qc_flags` and counted in
+the QC report. The scrub is repeated in `clean_field()`, the single choke point every output row
+passes through, and the build fails loudly if a path survives into any written file.
+
+Merged references are capped at 2000 characters, but only ever on a ` || ` boundary -- a
+mid-string chop once left half a file path in the table. Dropped entries are announced as
+`(+N more)`.
+
+## Published artefacts
+
+`output/contaminants_master_<ts>.tsv` (shipped as `data/contaminants.tsv`) is the merged,
+m/z-resolved table: 35 columns, one row per unique ion. It carries the 18 part columns plus
+computed mass/ladder columns and the accumulated provenance columns `n_records`, `provenance`,
+`source_types`, `references` (` || `-separated), `record_ids` (`;`-separated) and `qc_flags`.
+
+`site/data/contaminants.json` (shipped as `data/contaminants.json`) is the columnar bundle the
+web app loads. Shape:
+
+```
+{ "fields": [...32 short keys...], "rows": [[...], ...], "meta": {...} }
+```
+
+Each row is an array positionally matching `fields`. Three fields carry provenance and search
+keys:
+
+| field | type | meaning |
+|-------|------|---------|
+| `refs` | array of integers | indices into `meta.refTable`; `[]` when the row has none |
+| `syn`  | string | `;`-separated synonyms, `""` when none |
+| `rid`  | string | `;`-separated source `record_id`s |
+
+`meta.refTable` is an array of distinct reference strings. Reference text is interned because it
+is highly repetitive -- 778 distinct strings across ~9,200 row-level occurrences -- so inlining
+them would add ~1.9 MB to a bundle every visitor downloads, against ~0.3 MB interned. `syn` and
+`rid` are stored as plain strings: their values are near-unique per row, so interning them would
+buy little and cost the app an indirection. Rows whose `mz` is empty are omitted from the bundle,
+so `rows` is slightly shorter than the TSV.

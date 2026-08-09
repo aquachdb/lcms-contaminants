@@ -9,6 +9,8 @@
 
 const F = {}; // field name -> column index, filled once data loads
 let ROWS = [], META = {}, LADDERS = [];
+let MZ_ORDER = [], MZ_SORTED = null;   // row indices sorted by m/z, and their m/z
+let REFTAB = [];                       // meta.refTable, absent in older bundles
 let DATA_READY = false;   // never answer from an empty library
 
 const $ = id => document.getElementById(id);
@@ -174,6 +176,7 @@ async function load() {
     const data = await res.json();
     data.fields.forEach((name, i) => F[name] = i);
     ROWS = data.rows; META = data.meta;
+    REFTAB = (META && Array.isArray(META.refTable)) ? META.refTable : [];
     DATA_READY = ROWS.length > 0;
 
     $('statIons').textContent = META.n_ions.toLocaleString();
@@ -186,6 +189,14 @@ async function load() {
     const seen = new Map();
     ROWS.forEach(r => { if (r[F.fam] && r[F.spacing]) seen.set(r[F.fam], r[F.spacing]); });
     LADDERS = [...seen.entries()].sort((a, b) => a[1] - b[1]);
+
+    // m/z-sorted index, so a lookup touches only the rows inside the window.
+    // searchMz used to scan all ~5,000 rows and run passesFilters (ten DOM
+    // reads) on each; once per peak that is 5,000 x n, which is what actually
+    // froze the tab on a large peak list.
+    MZ_ORDER = ROWS.map((r, i) => i).filter(i => isFinite(ROWS[i][F.mz]))
+      .sort((a, b) => ROWS[a][F.mz] - ROWS[b][F.mz]);
+    MZ_SORTED = Float64Array.from(MZ_ORDER, i => ROWS[i][F.mz]);
 
     $('status').textContent = '';
     showWelcome();
@@ -206,6 +217,64 @@ async function load() {
 }
 
 /* ------------------------------------------------------------------ helpers */
+/* Optional data columns. They are read through a string key on purpose: they
+   may or may not be present in data/contaminants.json, and tools/check_site.py
+   (rightly) fails any F.<name> the data does not define. Returns '' when the
+   column, or the value in it, is absent. */
+const optCol = (r, key) => (F[key] != null && r[F[key]] != null) ? String(r[F[key]]) : '';
+
+/* Citations. `refs` is an array of indices into meta.refTable, not a string,
+   so it cannot go through optCol. Every step is feature-detected and
+   bounds-checked: a browser holding a stale cached bundle can carry indices
+   the current refTable does not reach, and "undefined | undefined" printed as
+   a citation would be worse than printing nothing. */
+function refsOf(r) {
+  if (F.refs == null || !REFTAB.length) return [];
+  const v = r[F.refs];
+  if (!v || typeof v.map !== 'function') return [];
+  return v.map(i => REFTAB[i]).filter(s => typeof s === 'string' && s);
+}
+
+/* One citation, with its bare-URL segments made clickable. These strings are
+   pipe-separated provenance trails; a segment is linkified only when the WHOLE
+   segment is an http(s) URL, so free text that merely mentions a DOI stays
+   text. Building this as DOM nodes rather than an HTML string is what escapes
+   it -- textContent is the escape mechanism used everywhere else in this file,
+   and the scheme test is what keeps a javascript: URL out of href. */
+function refNode(str) {
+  const span = el('span');
+  // Citations carry unbreakable tokens -- DOIs, raw.githubusercontent.com
+  // paths, uwpr_commonmassspeccontaminants.xls -- that are wider than a 390 px
+  // phone and push the whole page sideways. styles.css cannot be edited here,
+  // so the wrap rule is set on the node itself.
+  span.style.display = 'block';
+  span.style.overflowWrap = 'anywhere';
+  span.style.wordBreak = 'break-word';
+  str.split(/\s*\|\s*/).forEach((seg, i) => {
+    if (i) span.append(document.createTextNode(' | '));
+    if (/^https?:\/\/[^\s"'<>]+$/.test(seg)) {
+      const a = el('a', 'ref-link', seg);
+      a.href = seg; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      // styles.css has no rule for links; the UA default is unreadable on the
+      // dark theme, and these DOIs are long enough to overflow a narrow card
+      a.style.color = 'var(--accent)'; a.style.wordBreak = 'break-word';
+      span.append(a);
+    } else span.append(document.createTextNode(seg));
+  });
+  return span;
+}
+
+function citationBlock(r) {
+  const refs = refsOf(r);
+  if (!refs.length) return null;
+  const b = el('div', 'ev-block');
+  b.append(el('div', 'ev-title', refs.length === 1 ? 'Source' : 'Sources (' + refs.length + ')'));
+  const ul = el('ul', 'ev-list');
+  refs.forEach(s => { const li = el('li'); li.append(refNode(s)); ul.append(li); });
+  b.append(ul);
+  return b;
+}
+
 const prettyCat = c => c.replace(/_/g, ' ').replace(/\b(peg|ppg|ms1|ms2)\b/gi, m => m.toUpperCase());
 const fmt = (v, n = 4) => (v == null || v === '') ? '—' : Number(v).toFixed(n);
 const num = id => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
@@ -553,9 +622,23 @@ function prominence(r) {
   return p;
 }
 
+// first index of MZ_SORTED whose value is >= v
+function lowerBound(v) {
+  let lo = 0, hi = MZ_SORTED.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (MZ_SORTED[mid] < v) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
 function searchMz(mz, tol, polarity) {
   const out = [];
-  for (const r of ROWS) {
+  if (MZ_SORTED && MZ_SORTED.length === MZ_ORDER.length && MZ_ORDER.length) {
+    for (let k = lowerBound(mz - tol); k < MZ_SORTED.length && MZ_SORTED[k] <= mz + tol; k++) {
+      const r = ROWS[MZ_ORDER[k]], d = r[F.mz] - mz;
+      if (polarity && r[F.pol] !== polarity) continue;
+      if (!passesFilters(r)) continue;
+      out.push({ r: r, delta: d });
+    }
+  } else for (const r of ROWS) {          // index not built yet (data still loading)
     const d = r[F.mz] - mz;
     if (Math.abs(d) > tol) continue;
     if (polarity && r[F.pol] !== polarity) continue;
@@ -998,24 +1081,128 @@ const REPEATS = [
   { name: 'CH₂ alkyl homologue', mass: 14.0157 }
 ];
 
+/* ---------------------------------------------------- peak-list input parsing
+   Two guards live here, and both exist because getting them wrong returns a
+   confident WRONG answer rather than an error.
+
+   1. The decimal comma. A European export writes siloxane D5 as "371,1012".
+      Splitting the line on commas first turns that into 371.0000 -- a
+      plausible-looking m/z that is 101 mDa (272 ppm) away from the truth, and
+      the tool then names a different compound with no warning at all. The
+      convention is therefore decided ONCE for the whole pasted block from
+      unambiguous evidence, never guessed line by line, and whatever was
+      assumed is stated on screen.
+   2. Size. A peak list is pasted, so it can be arbitrarily long, and every
+      stage downstream is synchronous. Past the cap the tab simply freezes. */
+const MAX_PEAKS = 20000;       // peaks accepted from the paste box
+const MAX_PEAK_ROWS = 500;     // result rows actually rendered
+
+/* Evidence for which mark is the decimal point, gathered from one numeric run
+   (a maximal stretch of digits, dots and commas). A thousands separator ALWAYS
+   groups exactly three digits, so a mark followed by any other run length is a
+   decimal point and can be nothing else. Runs that admit both readings, such
+   as 1,234, contribute no evidence on purpose -- they are the ambiguous case,
+   and counting them as evidence is exactly the guess this code must not make. */
+function markEvidence(run, ev) {
+  const hasDot = run.indexOf('.') >= 0, hasComma = run.indexOf(',') >= 0;
+  if (hasDot && hasComma) {
+    const li = Math.max(run.lastIndexOf('.'), run.lastIndexOf(','));
+    const mark = run.charAt(li), head = run.slice(0, li), tail = run.slice(li + 1);
+    // for the later mark to be the decimal point, the earlier one must be a
+    // valid thousands separator throughout: 1,371.1012 and 1.371,1012
+    const grouped = mark === ',' ? /^\d{1,3}(?:\.\d{3})+$/.test(head)
+                                 : /^\d{1,3}(?:,\d{3})+$/.test(head);
+    if (grouped && /^\d+$/.test(tail)) { ev[mark === ',' ? 'comma' : 'dot']++; return; }
+    // it cannot be a decimal point, so it separates two columns
+    // (371.1012,4500000 is m/z then intensity) -- judge the first column only
+    markEvidence(head, ev);
+    return;
+  }
+  const mark = hasDot ? '.' : hasComma ? ',' : '';
+  if (!mark) return;
+  const parts = run.split(mark);
+  if (parts.length === 2 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+    if (parts[1].length !== 3) ev[mark === ',' ? 'comma' : 'dot']++;   // 371,1012 / 371.1012
+    else ev.grouped++;                                                 // 1,234 -- both readings work
+    return;
+  }
+  if (/^\d{1,3}(?:[.,]\d{3})+$/.test(run)) ev.grouped++;               // 1.371.000
+}
+
+const numericRuns = line => (line.match(/\d[\d.,]*/g) || []).map(r => r.replace(/[.,]+$/, ''));
+
+function decimalConvention(lines) {
+  const ev = { dot: 0, comma: 0, grouped: 0 };
+  lines.forEach(line => numericRuns(line).forEach(r => markEvidence(r, ev)));
+  if (ev.dot && !ev.comma) return { mark: '.', note: '' };
+  if (ev.comma && !ev.dot) return { mark: ',', note:
+    'Decimal comma assumed: ' + ev.comma + ' value(s) here have a comma in front of something other than ' +
+    'three digits, which no thousands separator ever does. Commas were read as decimal marks, not as ' +
+    'column separators. If your file uses commas between columns, separate them with a tab or a semicolon.' };
+  if (ev.dot && ev.comma) return { mark: '.', note:
+    'This list mixes both conventions: ' + ev.dot + ' value(s) use a decimal point and ' + ev.comma +
+    ' use a decimal comma. The decimal POINT was assumed and commas were treated as column separators, ' +
+    'so any comma-decimal value was truncated at the comma. Check the m/z column below before trusting it, ' +
+    'and re-paste in one convention.' };
+  if (ev.grouped) {
+    // Every comma in the block sits in front of exactly three digits, so
+    // 371,101 could mean 371.101 or 371101 and nothing in the text decides it.
+    // Break the tie on plausibility rather than on locale folklore: an m/z of
+    // 371101 is outside anything this tool covers.
+    let asDecimal = 0, asGroup = 0;
+    lines.forEach(line => numericRuns(line).forEach(r => {
+      if (!/^\d{1,3}(?:,\d{3})+$/.test(r)) return;
+      const g = parseFloat(r.replace(/,/g, ''));
+      if (g > 0 && g <= 100000) asGroup++;
+      if (r.split(',').length === 2) { const d = parseFloat(r.replace(',', '.')); if (d > 0 && d <= 100000) asDecimal++; }
+    }));
+    if (!asDecimal && !asGroup) return { mark: '.', note: '' };
+    const comma = asDecimal > asGroup;
+    return { mark: comma ? ',' : '.', note:
+      'Ambiguous decimal mark: every comma here groups exactly three digits, so 371,101 could mean 371.101 ' +
+      'or 371101 and the text cannot decide it. It was read as ' + (comma ? 'a decimal comma' : 'a thousands/column separator') +
+      ' because that is the reading which puts these values inside the m/z range this tool covers (' +
+      (comma ? asDecimal : asGroup) + ' plausible vs ' + (comma ? asGroup : asDecimal) + '). ' +
+      'Give the values to four decimals, or use a tab between columns, to remove the ambiguity.' };
+  }
+  return { mark: '.', note: '' };
+}
+
+/* Pull the m/z out of one line, given the block-wide decimal mark. */
+function firstNumericToken(line, mark) {
+  if (mark === ',') {
+    // the comma is the decimal mark here, so it can never split columns
+    let tok = line.split(/[;\t]|\s+/)[0].trim();
+    if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(tok)) tok = tok.replace(/\./g, '');   // 1.371,1012
+    return tok.replace(',', '.');
+  }
+  // genuine thousands grouping, anchored so "1,371.1012, 4.5e6" also works.
+  // The trailing guard is what keeps 371,1012 out: a fourth digit after the
+  // group means it was never a thousands separator.
+  const g = line.match(/^\+?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\d,])/);
+  if (g) return g[0].replace(/,/g, '');
+  // first column only: m/z then intensity is the usual export shape
+  return line.split(/[,;\t]|\s{2,}/)[0].trim();
+}
+
 function peakListValues() {
-  const txt = ($('peaklist').value || '');
+  const lines = ($('peaklist').value || '').split(/[\r\n]+/)
+    .map(s => s.trim()).filter(Boolean);
+  const conv = decimalConvention(lines);
   const out = [];
-  let rejected = 0;
-  txt.split(/[\r\n]+/).forEach(raw => {
-    const line = raw.trim();
-    if (!line) return;
-    // first column only: m/z then intensity is the usual export shape
-    let tok = line.split(/[,;\t]|\s{2,}/)[0].trim();
-    // 1,371.1012 -> 1371.1012, but only for genuine thousands grouping
-    if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(line.trim())) tok = line.trim().replace(/,/g, '');
+  let rejected = 0, overflow = 0;
+  for (const line of lines) {
+    const tok = firstNumericToken(line, conv.mark);
     // whole token must be a number, optionally in scientific notation
-    if (!/^\+?\d*\.?\d+(?:[eE][+-]?\d+)?$/.test(tok)) { rejected++; return; }
+    if (!/^\+?\d*\.?\d+(?:[eE][+-]?\d+)?$/.test(tok)) { rejected++; continue; }
     const v = parseFloat(tok);
-    if (!isFinite(v) || v <= 0 || v > 100000) { rejected++; return; }
+    if (!isFinite(v) || v <= 0 || v > 100000) { rejected++; continue; }
+    if (out.length >= MAX_PEAKS) { overflow++; continue; }
     out.push(v);
-  });
+  }
   out.rejected = rejected;
+  out.overflow = overflow;          // valid peaks dropped by the cap, never silently
+  out.convention = conv;
   return out;
 }
 
@@ -1156,6 +1343,7 @@ function explanationCard(x, obs) {
     x.caveats.forEach(t => ul.append(el('li', null, t)));
     b.append(ul); c.append(b);
   }
+  if (x.row) { const cite = citationBlock(x.row); if (cite) c.append(cite); }
 
   if (x.row) {
     const r = x.row;
@@ -1245,6 +1433,8 @@ function libraryCard(hit) {
   if (r[F.charge] && String(r[F.charge]) !== '1') chips.append(chip('charge ' + r[F.charge], 'strong'));
   c.append(chips);
   if (r[F.origin]) c.append(el('p', 'why', r[F.origin]));
+  const cite = citationBlock(r);
+  if (cite) c.append(cite);
   return c;
 }
 
@@ -1252,7 +1442,8 @@ function searchText(q) {
   const out = [];
   for (const r of ROWS) {
     if (!passesFilters(r)) continue;
-    const hay = (r[F.name] + ' ' + r[F.formula] + ' ' + r[F.cat] + ' ' + r[F.fam] + ' ' + r[F.origin]).toLowerCase();
+    const hay = (r[F.name] + ' ' + r[F.formula] + ' ' + r[F.cat] + ' ' + r[F.fam] + ' ' + r[F.origin] +
+      ' ' + optCol(r, 'syn')).toLowerCase();
     const i = hay.indexOf(q);
     if (i >= 0) out.push({ r: r, delta: null, rank: i + (r[F.name].toLowerCase().startsWith(q) ? -100 : 0) });
   }
@@ -1432,38 +1623,107 @@ function run() {
 /* ------------------------------------------------------------- peak list mode */
 /* Series spacing is divided by charge: a 3+ PEG envelope steps by 14.6754, and
    an analyst staring at 14.68 will not recognise it as PEG unless told. */
+/* Tolerance for matching a SPACING. A spacing is a difference of two measured
+   masses, so it carries both peaks' error -- but it is still a mass difference
+   on a mass spectrometer, not a free parameter. */
+function seriesTol(step) {
+  // A quadrupole or trap reports nominal masses: the siloxane repeat 74.0188
+  // and the CH2-family spacing 74.1353 both read as "74", and no window will
+  // separate them. Half a nominal unit is the honest answer, matching what
+  // toleranceFor() already does for unit-resolution matching.
+  if (unitResolution()) return 0.4;
+  // High resolution. The old window was step * 0.002 -- 2000 ppm, +-0.148 Da on
+  // a 74 Da repeat. That is 1.3x the ENTIRE 0.1165 Da gap between the siloxane
+  // and CH2 repeats, so every alkyl homologue ladder was reported as PDMS.
+  //
+  // Floor of 0.0025 Da: 10 ppm of a 44.0262 ethoxylate step is only 0.44 mDa,
+  // tighter than a real difference of two centroids, so a ppm-only rule would
+  // miss genuine low-mass ladders. Two peak positions each good to ~1 mDa
+  // (routine for a centroided Orbitrap peak; a peak list quoted to 4 decimals
+  // adds +-0.05 mDa of quantisation) subtract to ~1.4 mDa, so 0.0025 Da is a
+  // ~2-sigma allowance. It is 59x tighter than the old window and still 23x
+  // smaller than the 0.1165 Da separation this detector has to preserve.
+  const floor = 0.0025;
+  const mode = $('tolMode') ? $('tolMode').value : 'auto';
+  const val = parseFloat($('tolValue') ? $('tolValue').value : '');
+  if (mode === 'ppm' && val > 0) return Math.max(step * val / 1e6, floor);
+  // A user-set Da window is honoured, but capped at 0.05: half the gap between
+  // the repeats above is 0.058 Da, so a wider spacing window could not tell
+  // them apart at all and would reinstate the defect this replaces.
+  if (mode === 'da' && val > 0) return Math.min(Math.max(val, floor), 0.05);
+  return Math.max(step * 10 / 1e6, floor);
+}
+
+/* Two passes, because one greedy pass gets both the chains and the ownership
+   wrong. Pass 1 enumerates the MAXIMAL chain through every peak for each
+   repeat/charge -- each peak has at most one successor at a fixed spacing, so
+   the chains of one repeat are disjoint by construction and no near-duplicate
+   sub-chains are produced. Pass 2 hands peaks out best-first across ALL repeat
+   families, so a peak that has been explained as PDMS can no longer also be
+   sold as a KCl cluster. */
 function detectSeries(mzs) {
-  const sorted = [...new Set(mzs)].sort((a, b) => a - b);
-  const found = [];
-  const claimed = new Set();
+  let sorted = [...new Set(mzs)].sort((a, b) => a - b);
+  if (sorted.length > MAX_PEAKS) sorted = sorted.slice(0, MAX_PEAKS);
+  const n = sorted.length;
+  if (n < 3) return [];
   const reps = REPEATS.concat(LADDERS.map(l => ({ name: l[0], mass: l[1] })));
   const seenRep = {};
+  const cands = [];
+  const next = new Int32Array(n), head = new Uint8Array(n);
+
   for (const rep of reps) {
     if (!rep.mass || seenRep[rep.name]) continue;
     seenRep[rep.name] = 1;
     for (let z = 1; z <= 4; z++) {
       const step = rep.mass / z;
       if (step < 3) continue;
-      const tol = Math.max(0.02, step * 0.002);
-      for (let i = 0; i < sorted.length; i++) {
-        const chain = [sorted[i]];
-        let cur = sorted[i];
-        for (let j = i + 1; j < sorted.length; j++) {
-          if (Math.abs(sorted[j] - cur - step) <= tol) { chain.push(sorted[j]); cur = sorted[j]; }
+      const tol = seriesTol(step);
+      // sorted[i] + step is monotonic in i because sorted is sorted, so one
+      // forward pointer finds every successor in a single O(n) sweep. The old
+      // code rescanned the whole tail from every start index: O(n^2) per
+      // repeat per charge, ~30 x 4 times over.
+      next.fill(-1); head.fill(1);
+      let p = 1;
+      for (let i = 0; i < n; i++) {
+        const t = sorted[i] + step;
+        if (p <= i) p = i + 1;
+        while (p < n && sorted[p] < t - tol) p++;
+        let best = -1, bestd = tol;
+        for (let q = p; q < n && sorted[q] <= t + tol; q++) {
+          const d = Math.abs(sorted[q] - t);
+          if (d <= bestd) { bestd = d; best = q; }
         }
-        if (chain.length >= 3) {
-          const key = rep.name + '|' + z + '|' + chain[0].toFixed(2);
-          if (claimed.has(key)) continue;
-          if (chain.every(m => claimed.has('m' + m.toFixed(4) + rep.name))) continue;
-          chain.forEach(m => claimed.add('m' + m.toFixed(4) + rep.name));
-          claimed.add(key);
-          found.push({ name: rep.name, z: z, step: step, repeat: rep.mass, members: chain });
-        }
+        next[i] = best;
+        if (best >= 0) head[best] = 0;      // it has a predecessor, so it starts nothing
+      }
+      for (let i = 0; i < n; i++) {
+        if (!head[i] || next[i] < 0) continue;
+        const idx = [i]; let resid = 0, cur = i;
+        while (next[cur] >= 0) { resid += Math.abs(sorted[next[cur]] - sorted[cur] - step); cur = next[cur]; idx.push(cur); }
+        if (idx.length < 3) continue;
+        cands.push({ name: rep.name, z: z, step: step, repeat: rep.mass, idx: idx,
+                     resid: resid / (idx.length - 1) });
       }
     }
   }
-  found.sort((a, b) => b.members.length - a.members.length);
-  return found.slice(0, 12);
+
+  // longest chain first, then the tighter mean residual, then the larger
+  // repeat (a 74 Da ladder explains more than the CH2 sub-pattern inside it),
+  // then the name -- fully deterministic, never array order.
+  cands.sort((a, b) => b.idx.length - a.idx.length || a.resid - b.resid ||
+                       b.repeat - a.repeat || (a.name < b.name ? -1 : a.name > b.name ? 1 : a.z - b.z));
+  const claimed = new Uint8Array(n);
+  const found = [];
+  for (const c of cands) {
+    if (found.length >= 12) break;
+    let free = true;
+    for (const i of c.idx) if (claimed[i]) { free = false; break; }
+    if (!free) continue;                       // exclusive: one peak, one explanation
+    for (const i of c.idx) claimed[i] = 1;
+    found.push({ name: c.name, z: c.z, step: c.step, repeat: c.repeat,
+                 resid: c.resid, members: c.idx.map(i => sorted[i]) });
+  }
+  return found;
 }
 
 function runPeakList() {
@@ -1481,6 +1741,23 @@ function runPeakList() {
   const box = $('cards'); box.textContent = '';
   const matched = results.filter(r => r.best).length;
   $('status').textContent = matched + ' of ' + mzs.length + ' peaks matched a known contaminant.';
+
+  // Anything the parser had to assume, or anything it dropped, is stated here.
+  // el() writes through textContent, which is how every other string from the
+  // data or the user reaches the DOM in this file -- it escapes by construction.
+  const notes = [];
+  if (mzs.convention && mzs.convention.note) notes.push(mzs.convention.note);
+  if (mzs.overflow) notes.push('Peak-list cap reached: the first ' + MAX_PEAKS.toLocaleString() +
+    ' peaks were processed and ' + mzs.overflow.toLocaleString() + ' further valid peaks were ignored. ' +
+    'Everything here is synchronous and runs in your browser; past this size the tab stops responding. ' +
+    'Split the list if you need the rest.');
+  if (mzs.rejected) notes.push(mzs.rejected.toLocaleString() + ' line(s) held nothing readable as an m/z and were skipped.');
+  if (notes.length) {
+    const nb = el('div', 'card');
+    nb.append(el('div', 'card-name', 'How this list was read'));
+    notes.forEach(t => nb.append(el('p', 'why', t)));
+    box.append(nb);
+  }
 
   const series = detectSeries(mzs);
   if (series.length) {
@@ -1502,7 +1779,7 @@ function runPeakList() {
   tbl.innerHTML = '<thead><tr><th class="num">your m/z</th><th>best match</th>' +
     '<th class="num">Δ ppm</th><th>class</th><th class="num">other candidates</th></tr></thead>';
   const tb = el('tbody');
-  for (const res of results) {
+  for (const res of results.slice(0, MAX_PEAK_ROWS)) {
     const tr = el('tr');
     tr.append(el('td', 'num', fmt(res.mz)));
     if (res.best) {
@@ -1519,6 +1796,11 @@ function runPeakList() {
   }
   tbl.append(tb);
   const wrap = el('div', 'scroll-x'); wrap.append(tbl); box.append(wrap);
+  // Truncating a results table without saying so reads as "that was all of it".
+  if (results.length > MAX_PEAK_ROWS)
+    box.append(el('p', 'status', 'Showing the first ' + MAX_PEAK_ROWS.toLocaleString() + ' of ' +
+      results.length.toLocaleString() + ' peaks. The CSV download contains all ' +
+      results.length.toLocaleString() + '.'));
 
   const btn = $('downloadList');
   btn.hidden = false;

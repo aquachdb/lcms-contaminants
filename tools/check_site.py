@@ -21,7 +21,10 @@ path = os.path.join(SITE, "data", "contaminants.json")
 raw = open(path, encoding="utf-8").read()
 print("data file: %.2f MB" % (len(raw) / 1e6))
 for tok in ("NaN", "Infinity"):
-    n = len(re.findall(r'(?<![A-Za-z"])' + tok + r'(?![A-Za-z"])', raw))
+    # only where a JSON value can start -- otherwise legitimate chemistry inside
+    # strings trips this: 'NaN3' (sodium azide) and 'C2H3O2NaNa' both contain the
+    # token. The authoritative check is the strict parse below.
+    n = len(re.findall(r'(?<=[\[,:])\s*' + tok + r'(?![A-Za-z0-9_"])', raw))
     print("  bare %-9s occurrences: %d" % (tok, n))
     if n:
         fails.append("data contains bare %s, which JSON.parse rejects" % tok)

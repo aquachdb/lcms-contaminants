@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LC-MS Contaminant Finder — identify background ions by m/z</title>
-<meta name="description" content="Type an m/z and find out which known LC-MS contaminant it matches. 4,973 background ions from plasticizers, siloxanes, PEG, surfactants, solvents, labware, column bleed and metal corrosion. Free, and runs entirely in your browser.">
+<meta name="description" content="Type an m/z and find out which known LC-MS contaminant it matches. 6,313 background ions from plasticizers, siloxanes, PEG, surfactants, solvents, labware, column bleed and metal corrosion. Free, and runs entirely in your browser.">
 <link rel="canonical" href="https://aquachdb.github.io/lcms-contaminants/">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="website">
 <meta property="og:title" content="LC-MS Contaminant Finder — identify background ions by m/z">
-<meta property="og:description" content="Type an m/z and see which known contaminant it matches. 4,973 ions aggregated from published contaminant lists, vendor tables and spectral databases.">
+<meta property="og:description" content="Type an m/z and see which known contaminant it matches. 6,313 ions aggregated from published contaminant lists, vendor tables and spectral databases.">
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
 <script type="application/ld+json">
@@ -281,11 +281,13 @@
   <div class="wrap">
     <p>Aggregated from peer-reviewed contaminant tables, instrument-vendor background ion lists, core-facility
        tables, spectral databases and public code repositories.
-       <strong>3,842 of 4,973 ions (77%)</strong> have their m/z recomputed here from a molecular formula and
+       <strong>5,182 of 6,313 ions (82%)</strong> have their m/z recomputed here from a molecular formula and
        adduct; 1,004 carry the value their source published, and 127 only a nominal integer mass. The last two
        are labelled on every result, and the nominal ones are shown as <code>~45</code> rather than as an exact
-       mass. About 38% of entries rest on domain knowledge cross-checked against this literature rather than on
-       a single citable table.</p>
+       mass. 59% of entries rest on domain knowledge cross-checked against this literature rather than on
+       a single citable table, and <strong>1,329 (21%) are computed adduct forms</strong> &mdash; formate, acetate,
+       chloride and deprotonated ions derived by rule from a contaminant with a verified structure, not ions
+       anyone has reported observing. Every one of those says so on its card.</p>
     <p class="micro">
        <a href="https://github.com/aquachdb/lcms-contaminants">Source, full dataset and issue tracker on GitHub</a> ·
        <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/data/contaminants.tsv">Download the data (TSV)</a> ·
