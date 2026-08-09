@@ -53,7 +53,10 @@ that loaded forever, caused by a single missing parenthesis that no test execute
 Please do not skip them.
 
 Data contributions go in `parts/` (recalled or curated) or `web/` (extracted from
-a source), following the 18-column contract in `data/SCHEMA.md`. Corrections to existing
+a source), following the 18-column **part-file** contract in `data/SCHEMA.md` — which
+is a different, wider contract from the 42-column published table described lower in
+that file. Part files write `NA` for a value you do not have; the build turns that
+into an empty field, so never write `NA` into anything under `data/`. Corrections to existing
 rows go in `corrections.tsv` as an auditable overlay with a stated reason, rather
 than editing the source part files — that way every change stays reviewable.
 
@@ -62,9 +65,10 @@ than editing the source part files — that way every change stays reviewable.
 - **Copyrighted source documents.** Publisher PDFs and vendor manuals cannot be
   redistributed here. Cite them; derive facts from them; do not commit them.
 - **Spectra under non-commercial or share-alike licences**, unless clearly
-  segregated and labelled. See `ms2/MS2B_licensing.md` for why this is not
-  hypothetical — a widely used aggregate library is labelled CC BY while
-  containing a measurable fraction of non-commercial material.
+  segregated and labelled. This is not hypothetical: a widely used aggregate
+  library is labelled CC BY while containing a measurable fraction of
+  non-commercial material, which is why the table's `ms2_licence_tier` column
+  (see `data/SCHEMA.md`) records reuse terms per ion rather than assuming them.
 
 ## Licence
 

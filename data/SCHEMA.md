@@ -1,5 +1,16 @@
 # Shared TSV schema for LC-MS contaminant tables
 
+This file is the column contract for two different things, and they do not use the same
+convention for a missing value:
+
+* the **part files** the compendium is built from -- 18 columns, `NA` for unknown;
+* the **published table** `data/contaminants.tsv` -- 42 columns, an **empty field** for unknown.
+
+Part files are what a contributor writes; `contaminants.tsv` is what a reader cites. See
+[Published artefacts](#published-artefacts) for the published columns.
+
+## Part files (input)
+
 All part files are **tab-separated**, UTF-8, with this exact header row (18 columns, in order).
 Use `NA` for unknown. NEVER put a literal tab, newline, or quote character inside a field.
 
@@ -115,19 +126,124 @@ group; a category disagreement is surfaced as `merged_category_conflict:...` in 
 
 ## Published artefacts
 
-`output/contaminants_master_<ts>.tsv` (shipped as `data/contaminants.tsv`) is the merged,
-m/z-resolved table: 39 columns, one row per unique ion. It carries the 18 part columns plus
-computed mass/ladder columns and the accumulated provenance columns `n_records`, `provenance`,
-`source_types`, `references` (` || `-separated), `record_ids` (`;`-separated) and `qc_flags`.
+`data/contaminants.tsv` is the merged, m/z-resolved table: **42 columns, 5,964 rows, one row
+per unique ion**, tab-separated, UTF-8, no quoting and no escape character (no field contains a
+tab, newline or `"`). It is the merged master (`output/contaminants_master_<ts>.tsv` in the
+private pipeline -- its 18 part columns plus the computed mass, ladder and provenance columns)
+with the MS1 and MS2 evidence layers joined on as the last three columns by
+`build_site_data.py`, which writes this file and `contaminants.json` from **one** join so the
+two cannot disagree about the same ion.
 
-Four columns hold the ion identity and what the merge preserved:
+### Missing values are EMPTY, never `NA`
 
-| column | meaning |
-|--------|---------|
-| `ion_formula` | Hill-notation composition of the ION -- the merge key. Isotope-labelled adduct terms are bracketed (`C2H3[63Cu]N`) |
-| `alt_names` | `;`-separated other compound names that give rise to this same ion |
-| `alt_origins` | `;`-separated other reported `common_source` values |
-| `alt_adducts` | `;`-separated other adduct notations seen for it, qualified with the neutral they were written from when that differs (`[M]- of C2H2NaO4`) |
+A part file writes `NA`; this table writes nothing at all. `NA` is a placeholder, not a null:
+it is truthy in every language a consumer will use, so `if row["neutral_formula"]:` passes for
+a row that has no formula -- an audit of an earlier build reported "rows with no
+neutral_formula: 0" for a table where 1,137 rows had none -- and it is one case-fold away from
+sodium. `build_tables.clean_field()` empties every such placeholder (`NA`, `N/A`, `null`,
+`nan`, `-`, `?`, `unknown`, `TBD`, ...) at the single choke point every output row passes
+through, including placeholders hiding as one element of a `;`-separated list.
+
+Two spellings are **real values** and are deliberately kept:
+
+* `mz_basis` = `none` -- one of that column's three documented states.
+* `contaminant_name` = `unknown` (8 rows) -- MaConDa and the Waters list publish these ions as
+  unidentified. That is what the source says, not a value we failed to fill in.
+
+And `Na` (mixed case) is sodium: it is the `neutral_formula` and `ion_formula` of the elemental
+sodium row and is never treated as a placeholder in any column.
+
+### Columns
+
+| # | column | definition |
+|---|--------|------------|
+| 1 | `mz` | m/z of the ion, 4 dp. Empty for the 30 rows we hold no mass for. Recomputed from formula + adduct when `mz_basis` = `calculated_from_formula` |
+| 2 | `polarity` | `pos` or `neg` |
+| 3 | `charge` | absolute charge, `1`-`6` |
+| 4 | `contaminant_name` | preferred name of the NEUTRAL contaminant this ion is presented as coming from |
+| 5 | `adduct` | ion species in the canonical notation (`canonical_adduct()`); empty where no adduct could be assigned |
+| 6 | `neutral_formula` | Hill-notation formula of the neutral molecule; empty where none is known |
+| 7 | `ion_formula` | Hill-notation composition of the ION -- the merge key. Isotope-labelled adduct terms are bracketed (`C2H3[63Cu]N`) |
+| 8 | `neutral_mono_mass` | monoisotopic mass of `neutral_formula`, 6 dp |
+| 9 | `category` | one of the controlled vocabulary terms above |
+| 10 | `series_name` | homologous/polymer series this compound belongs to, as named by the source (`PEG`, `Triton X`, `Tween 60`) |
+| 11 | `n_repeat` | integer n of this oligomer within its series |
+| 12 | `repeat_unit_formula` | formula of that series' repeat unit |
+| 13 | `ladder_family` | homologous family this ion was assigned to by `ladders.py`, independently of `series_name` (`PEG / ethylene oxide`, `Polydimethylsiloxane`, `Ammonium formate cluster`) |
+| 14 | `ladder_repeat_formula` | formula of the family's repeat unit (`C2H4O`, `C2H6OSi`) |
+| 15 | `ladder_repeat_mass` | monoisotopic mass of that repeat unit, 4 dp |
+| 16 | `ladder_spacing_mz` | the spacing you actually OBSERVE: repeat mass ÷ charge. A PEG `[M+2Na]2+` envelope steps by 22.0131, not 44.0262 |
+| 17 | `ladder_prev_mz` | `mz` − `ladder_spacing_mz` -- where the previous member of the series should be |
+| 18 | `ladder_next_mz` | `mz` + `ladder_spacing_mz` |
+| 19 | `ladder_kmd` | Kendrick mass defect computed against **this family's own** repeat unit, not against CH2, so members of one series share a value |
+| 20 | `ladder_note` | the spacing stated in words, including the charge correction |
+| 21 | `ladder_family_size` | how many rows of this table belong to that family at the same adduct and polarity |
+| 22 | `ladder_prev_member` | the sibling row this table actually contains at `ladder_prev_mz` (±5 mDa), as `name @ m/z`; empty if the table has no such row |
+| 23 | `ladder_next_member` | same, at `ladder_next_mz` |
+| 24 | `ladder_family_members` | `;`-separated m/z of every sibling in the family |
+| 25 | `common_source` | where it comes from, short phrase |
+| 26 | `synonyms` | `;`-separated alternate names, including every other name the merge folded in |
+| 27 | `rt_behavior` | chromatographic behaviour where known (`void volume`, `elutes late/lipophilic`) |
+| 28 | `notes` | diagnostic detail: characteristic fragments, when it appears, how to remove it. Merged rows join their notes with ` \| ` |
+| 29 | `mz_basis` | `calculated_from_formula` (4,810) - recomputed here; `reported_only` (1,124) - the source's value, not independently recomputed; `none` (30) - no m/z at all |
+| 30 | `confidence` | `high` / `medium` / `low`; the best value in a merged group |
+| 31 | `alt_names` | `;`-separated other compound names that give rise to this same ion |
+| 32 | `alt_origins` | `;`-separated other reported `common_source` values |
+| 33 | `alt_adducts` | `;`-separated other adduct notations seen for it, qualified with the neutral they were written from when that differs (`[M]- of C2H2NaO4`) |
+| 34 | `n_records` | how many source records merged into this row |
+| 35 | `provenance` | `memory`, `web` or `memory+web` |
+| 36 | `source_types` | `;`-separated `source_type` values of the merged records |
+| 37 | `references` | ` \|\| `-separated citations, capped at 2000 characters on a separator boundary, never a local path |
+| 38 | `record_ids` | `;`-separated `record_id` of every merged source record |
+| 39 | `qc_flags` | `;`-separated build flags, see below |
+| 40 | `n_ms2_spectra` | how many public MS2 spectra this ion's compound has, see below |
+| 41 | `ms2_licence_tier` | whether those spectra may be redistributed, see below |
+| 42 | `ms1_specificity_tier` | how far the m/z alone goes towards an identification, see below |
+
+`qc_flags` vocabulary: `no_formula`, `no_adduct`, `no_mz`, `bad_adduct`,
+`adduct_loss_exceeds_molecule`, `mz_out_of_lc_ms_range`, `reported_is_nominal`,
+`reported_vs_calc_mismatch`, `reported_mz_multivalued`, `computed_adduct_only`,
+`computed_adduct_confirmed_by_observation`, `curated_correction_applied`,
+`reference_unresolved`, `merged_category_conflict:<other categories>`. Flags are the union
+over the merged records, so `no_formula` can appear on a row that does carry a formula: it
+means one of the records behind the row had none.
+
+### The MS2 and MS1 evidence columns
+
+`n_ms2_spectra` is a **count of public MS2 spectra**, matched to the compound (any of its
+names, including `alt_names`) through a verified InChIKey and aggregated from the harmonised
+Spectraverse collection of GNPS, MSnLib, MS-DIAL, MoNA, RIKEN, MassBank, HMDB and FooDB.
+937 of 5,964 rows have one.
+
+It is **empty, not `0`**, where no spectra are linked, because the two possible reasons cannot
+be told apart from this table and a `0` would assert the wrong one: either no public spectrum
+exists, or -- for the majority of this compendium, which is homologous series, ethoxylated
+surfactants and oligomer envelopes with no single structure -- there was no structure to search
+on in the first place. An empty field says "this table links no MS2 to this ion", which is all
+that is actually known.
+
+`ms2_licence_tier` says whether those spectra may be redistributed. It is empty whenever
+`n_ms2_spectra` is, and otherwise takes the **best** tier among the ion's spectra:
+
+| value | meaning |
+|-------|---------|
+| `open` | at least one spectrum comes from a source we can redistribute (GNPS CC0, MSnLib CC BY, MS-DIAL, CC BY/CC0 MassBank) |
+| `check` | redistributable only subject to a publication-specific condition; check before reuse |
+| `restricted` | non-commercial or share-alike upstream (HMDB, FooDB, RIKEN, NC/SA MassBank); link to it, do not bundle it |
+
+The tier describes **licensing, not spectral quality**, and it is a property of the compound's
+spectra, not of this ion's adduct.
+
+`ms1_specificity_tier` says how far the accurate mass **on its own** goes towards an
+identification, from the ion's mass defect and how crowded that mass is in known chemistry:
+
+| value | rows | meaning |
+|-------|------|---------|
+| `high` | 2,357 | the exact mass is distinctive; few known structures sit within a tight window |
+| `moderate` | 1,770 | narrows the field but does not settle it |
+| `low` | 496 | many candidates share this mass |
+| `ms1_alone_insufficient` | 33 | the mass cannot discriminate at all; MS2 or retention time is required |
+| *(empty)* | 1,308 | not assessed for this ion |
 
 `data/contaminants.json` is the columnar bundle the
 web app loads. Shape:
@@ -149,11 +265,20 @@ keys, and four carry ion identity:
 | `alto` | string | `;`-separated other reported origins |
 | `alta` | string | `;`-separated other adduct notations |
 
+Three fields carry the same evidence layers as the TSV's last three columns, and are written
+from the same join, so the two files always agree:
+
+| field | TSV column | note |
+|-------|-----------|------|
+| `ms2n` | `n_ms2_spectra` | integer; **`0`** here where the TSV is empty -- both are falsy, but JSON rows are fixed-length arrays and a number costs less than a null |
+| `ms2tier` | `ms2_licence_tier` | same vocabulary |
+| `ms1tier` | `ms1_specificity_tier` | same vocabulary |
+
 New fields are appended to the END of `fields`, and the app reads optional columns by name, so a
 browser holding an older cached bundle still loads.
 
 `meta.refTable` is an array of distinct reference strings. Reference text is interned because it
-is highly repetitive -- 778 distinct strings across ~9,200 row-level occurrences -- so inlining
+is highly repetitive -- 772 distinct strings across ~9,200 row-level occurrences -- so inlining
 them would add ~1.9 MB to a bundle every visitor downloads, against ~0.3 MB interned. `syn` and
 `rid` are stored as plain strings: their values are near-unique per row, so interning them would
 buy little and cost the app an indirection. Rows whose `mz` is empty are omitted from the bundle,

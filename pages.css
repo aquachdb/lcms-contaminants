@@ -1,0 +1,47 @@
+/* Landing pages. Reuses every colour, radius and font of styles.css through the
+   same custom properties -- there is one design system here, not two. Only the
+   handful of components the app itself does not have are defined below. */
+.lp-brand { font-size: 1.15rem; font-weight: 600; margin: 0; }
+.lp-brand a { color: inherit; text-decoration: none; }
+.lp-crumbs { font-size: .82rem; color: var(--muted); padding-top: 14px; }
+.lp-crumbs a { color: var(--muted); }
+.lp-hero { border-left-width: 4px; margin-top: 14px; }
+.lp-h1 { font-size: 1.32rem; margin: 0 0 10px; letter-spacing: -.01em; line-height: 1.3; }
+.lp-h1 .card-mz { font-size: 1.32rem; }
+.lp-lead { font-size: 1rem; margin: 12px 0; }
+.lp-caveats { margin: 12px 0; }
+.lp-caveats .ev-list { margin: 0; padding-left: 18px; }
+.lp-sec { margin: 26px 0; }
+.lp-sec h2 { font-size: 1.05rem; margin: 0 0 8px; }
+.lp-sec p { font-size: .93rem; }
+.lp-cta {
+  display: inline-block; min-height: 44px; line-height: 44px; padding: 0 16px;
+  border-radius: var(--radius); background: var(--accent); color: var(--on-accent);
+  font-weight: 600; font-size: .92rem; text-decoration: none;
+}
+.lp-cta:hover { filter: brightness(1.08); }
+.lp-links { list-style: none; margin: 8px 0 0; padding: 0; }
+.lp-links li { border-bottom: 1px solid var(--border); }
+.lp-links li:last-child { border-bottom: none; }
+.lp-links a, .lp-links .lp-plain {
+  display: block; min-height: 44px; padding: 11px 2px; font-size: .92rem;
+}
+.lp-links .lp-plain { color: var(--muted); }
+.lp-cols { columns: 2; column-gap: 26px; }
+.lp-cols li { break-inside: avoid; }
+.lp-dense a { font-size: .86rem; font-family: var(--mono); }
+.lp-notes { margin: 8px 0 0; padding-left: 18px; font-size: .93rem; }
+.lp-notes li { margin-bottom: 5px; }
+.lp-refs { margin: 8px 0 0; padding-left: 20px; font-size: .84rem; color: var(--muted); }
+.lp-refs li { margin-bottom: 7px; overflow-wrap: anywhere; }
+.lp-refs a { overflow-wrap: anywhere; }
+table.peaks th[scope="row"] {
+  text-transform: none; letter-spacing: 0; font-size: .82rem; white-space: nowrap;
+  vertical-align: top; width: 40%;
+}
+table.peaks td { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .lp-cols { columns: 1; }
+  .lp-h1, .lp-h1 .card-mz { font-size: 1.14rem; }
+  table.peaks th, table.peaks td { padding: 9px 7px; }
+}

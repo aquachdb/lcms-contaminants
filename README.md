@@ -90,15 +90,35 @@ mass difference** between two peaks.
 
 ## The data
 
-`data/contaminants.tsv` is the full compendium — one row per ion, with formula,
-adduct, polarity, computed *m/z*, contaminant class, provenance, homologous-series
-spacing, an MS1-specificity estimate and a flag for whether public MS2 exists.
-Column definitions are in `data/SCHEMA.md`. `data/contaminants.json` is the
-compact bundle the web app loads.
+Every ion that is a discrete, observed compound also has its own page — 1,954 of
+them, plus 167 homologous-series pages and 25 contaminant-class pages. Start at
+[browse.html](browse.html). Ions that exist only as a predicted adduct, or only
+as an anonymous rung of a polymer ladder, deliberately have no page of their own:
+they are catalogued on their series or class page instead, because publishing a
+labelled prediction as a standalone document would launder it into a fact.
+
+`data/contaminants.tsv` is the full compendium: **5,964 rows × 42 columns, one row
+per ion**. Each row carries the neutral formula and the ion's own elemental
+composition; adduct, polarity and charge; the *m/z*, recomputed from formula and
+adduct for 4,810 of them and labelled in `mz_basis` for the rest; contaminant
+class; where it comes from, and its own reference — every row has one. Then three
+layers of evidence: the homologous-series spacing to expect on either side of the
+peak (3,419 rows), how far the accurate mass alone can get you (`ms1_specificity_tier`,
+4,656 rows), and — for the 937 ions whose compound has public MS2 — how many spectra
+exist (`n_ms2_spectra`) and whether they may be redistributed (`ms2_licence_tier`).
+
+**A value we do not have is an empty field, never the string `NA`.** `NA` is truthy,
+so a placeholder makes `if row["neutral_formula"]:` pass for the 1,137 rows that have
+no formula — and it is one case-fold from sodium. Column definitions, including what
+an empty MS2 count does and does not mean, are in `data/SCHEMA.md`.
+
+`data/contaminants.json` is the compact bundle the web app loads. It is written by
+the same build from the same join, so it carries the same evidence layers as the TSV
+and cannot disagree with it; it omits only the 30 rows we hold no *m/z* for.
 
 Sources include peer-reviewed contaminant tables, instrument-vendor background
 ion lists, core-facility tables, spectral databases and public code
-repositories; each row records its own reference. See ATTRIBUTION.md.
+repositories. See ATTRIBUTION.md.
 
 ## Contributing — the part that matters most
 
