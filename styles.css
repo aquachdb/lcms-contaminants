@@ -222,6 +222,14 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
 .mono-small { font-family: var(--mono); font-size: .82rem; color: var(--muted); }
 .why { margin: 8px 0 0; font-size: .92rem; color: var(--text); }
 
+/* One card is one ION, which can stand for several contaminants, origins and
+   adduct spellings. Those alternatives are shown, not hidden -- they are extra
+   leads on the peak. Text only, so no new tap target is introduced. */
+.alt-info { margin: 8px 0 0; font-size: .87rem; color: var(--muted); }
+.alt-info p { margin: 3px 0 0; overflow-wrap: anywhere; }
+.alt-info b { color: var(--text); font-weight: 600; }
+.alt-info .mono { font-family: var(--mono); }
+
 .delta-inputs { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .delta-inputs input {
   flex: 1; min-width: 130px; padding: 11px 12px; font-family: var(--mono); font-size: 1rem;

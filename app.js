@@ -222,6 +222,35 @@ async function load() {
    (rightly) fails any F.<name> the data does not define. Returns '' when the
    column, or the value in it, is absent. */
 const optCol = (r, key) => (F[key] != null && r[F[key]] != null) ? String(r[F[key]]) : '';
+const splitList = s => (s || '').split(';').map(x => x.trim()).filter(Boolean);
+
+/* One row here is one ION, not one compound name. The table is merged on the
+   ion's elemental composition, so a single row can stand for several
+   contaminants, several reported origins and several adduct spellings — the
+   trifluoroacetate anion arrives both as the mobile-phase additive and as the
+   sodium trifluoroacetate calibrant. That is the most useful thing this data
+   knows about a peak, so it is shown on the card rather than hidden: an ion with
+   three possible sources is three leads, not clutter. */
+function altBlock(r) {
+  const names = splitList(optCol(r, 'altn'));
+  const origins = splitList(optCol(r, 'alto'));
+  const notations = splitList(optCol(r, 'alta'));
+  if (!names.length && !origins.length && !notations.length) return null;
+  const box = el('div', 'alt-info');
+  const line = (label, items, mono) => {
+    if (!items.length) return;
+    const p = el('p');
+    p.append(el('b', null, label + ' '));
+    p.append(el('span', mono ? 'mono' : null,
+      items.slice(0, 6).join(' · ') +
+      (items.length > 6 ? ' · +' + (items.length - 6) + ' more' : '')));
+    box.append(p);
+  };
+  line('Also arises from:', names);
+  line('Also reported from:', origins);
+  line('Also written as:', notations, true);
+  return box;
+}
 
 /* Citations. `refs` is an array of indices into meta.refTable, not a string,
    so it cannot go through optCol. Every step is feature-detected and
@@ -664,6 +693,15 @@ function layerLibrary(obs, iso) {
     const ev = ['matches a curated library entry to ' + ppmOf(obs.mz, r[F.mz]).toFixed(1) + ' ppm'];
     if ((r[F.nsrc] || 1) > 1) ev.push(r[F.nsrc] + ' independent sources report this ion');
     if (r[F.origin]) ev.push('reported origin: ' + r[F.origin]);
+    // the same ion from a different contaminant is a different lead, and the
+    // whole point of merging on ion identity was to keep those rather than
+    // publish one row per spelling
+    const altNames = splitList(optCol(r, 'altn'));
+    if (altNames.length) ev.push('the same ion also arises from ' +
+      altNames.slice(0, 3).join(', ') +
+      (altNames.length > 3 ? ' and ' + (altNames.length - 3) + ' more' : ''));
+    const altAd = splitList(optCol(r, 'alta'));
+    if (altAd.length) ev.push('also written as ' + altAd.slice(0, 3).join(', '));
     if (r[F.ms2n]) ev.push(r[F.ms2n] + ' public MS2 spectra exist for confirmation');
     if (r[F.fam] && r[F.spacing]) ev.push('member of the ' + r[F.fam] + ' series, members ' +
       fmt(r[F.spacing]) + ' apart' + (obs.charge > 1 ? ' (÷ ' + obs.charge + ' = ' +
@@ -1353,6 +1391,10 @@ function explanationCard(x, obs) {
     const row = (k, v) => { if (!v && v !== 0) return; const d = el('div');
       d.append(el('span', 'dk', k), el('span', null, String(v))); g.append(d); };
     row('Likely origin', r[F.origin]);
+    row('Ion composition', optCol(r, 'ionf'));
+    row('Also arises from', splitList(optCol(r, 'altn')).join(', '));
+    row('Also reported from', splitList(optCol(r, 'alto')).join('; '));
+    row('Also written as', splitList(optCol(r, 'alta')).join(', '));
     row('Reported by', r[F.src] === 'memory+web' ? 'independent recall and published sources'
         : r[F.src] === 'web' ? 'published sources' : 'domain knowledge');
     row('Confidence', r[F.conf]);
@@ -1433,6 +1475,8 @@ function libraryCard(hit) {
   if (r[F.charge] && String(r[F.charge]) !== '1') chips.append(chip('charge ' + r[F.charge], 'strong'));
   c.append(chips);
   if (r[F.origin]) c.append(el('p', 'why', r[F.origin]));
+  const alt = altBlock(r);
+  if (alt) c.append(alt);
   const cite = citationBlock(r);
   if (cite) c.append(cite);
   return c;
@@ -1442,8 +1486,10 @@ function searchText(q) {
   const out = [];
   for (const r of ROWS) {
     if (!passesFilters(r)) continue;
+    // merged rows must stay findable under every name and origin they absorbed
     const hay = (r[F.name] + ' ' + r[F.formula] + ' ' + r[F.cat] + ' ' + r[F.fam] + ' ' + r[F.origin] +
-      ' ' + optCol(r, 'syn')).toLowerCase();
+      ' ' + optCol(r, 'syn') + ' ' + optCol(r, 'altn') + ' ' + optCol(r, 'alto') +
+      ' ' + optCol(r, 'ionf')).toLowerCase();
     const i = hay.indexOf(q);
     if (i >= 0) out.push({ r: r, delta: null, rank: i + (r[F.name].toLowerCase().startsWith(q) ? -100 : 0) });
   }
@@ -1481,9 +1527,18 @@ function explain(obs) {
   all = all.concat(layerLibrary(obs, iso));
   all = all.concat(layerClusters(obs, iso));
   all = all.concat(layerFormula(obs, iso));
-  // do not repeat a formula the library already named
+  // Do not repeat an ion the library already named. The generated candidate is
+  // an ION composition, so it has to be compared against the library row's ion
+  // composition as well as its neutral formula -- otherwise "sodium formate +
+  // formate cluster, C2H2NaO4" is offered twice at 112.9856, once as a library
+  // hit written [2M+Na-2H]- of CH2O2 and once as a generated composition.
   const libFormulas = {};
-  all.forEach(x => { if (x.layer === 'library' && x.formula) libFormulas[x.formula] = 1; });
+  all.forEach(x => {
+    if (x.layer !== 'library') return;
+    if (x.formula) libFormulas[x.formula] = 1;
+    const ionf = x.row ? optCol(x.row, 'ionf') : '';
+    if (ionf) libFormulas[ionf] = 1;
+  });
   all = all.filter(x => !(x.layer === 'formula' && libFormulas[x.formula]));
   all.sort((a, b) => a.score - b.score);
   const companion = layerCompanion(obs, iso);
@@ -1548,8 +1603,11 @@ function renderExplanations(obs, res) {
       const note = el('p', 'isobaric-note');
       note.textContent = 'Isobaric alternatives — all ' + distinct + ' of these fit your mass. ' +
         'They are listed side by side and deliberately not resolved: mass alone cannot separate ' +
-        'trifluoroacetate from a sodium formate cluster, nor N-methylpyrrolidone from an ' +
-        'acetone/acetonitrile cluster. Use the companion evidence at the bottom to choose.';
+        'trifluoroacetate (C2F3O2⁻) from a sodium formate cluster (C2H2NaO4⁻), both 112.9856. ' +
+        'Candidates that are the SAME ion by elemental composition — protonated ' +
+        'N-methylpyrrolidone and the acetone/acetonitrile cluster are both C5H10NO⁺ — appear ' +
+        'instead as one card listing every contaminant it can come from. ' +
+        'Use the companion evidence at the bottom to choose.';
       box.append(note);
     }
     list.slice(0, 14).forEach(x => box.append(explanationCard(x, obs)));

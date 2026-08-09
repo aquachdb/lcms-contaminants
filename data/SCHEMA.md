@@ -87,28 +87,70 @@ Merged references are capped at 2000 characters, but only ever on a ` || ` bound
 mid-string chop once left half a file path in the table. Dropped entries are announced as
 `(+N more)`.
 
+## Ion identity: what makes two rows the same row
+
+Part files are written one row per (compound, adduct, polarity), as above. The merged table is
+one row per **ION**, and an ion's identity is its **elemental composition, charge and sign** --
+`mzcalc.ion_composition(neutral_formula, adduct)`. Nothing else is stable:
+
+* m/z is not. Trifluoroacetate (`C2F3O2-`) and the sodium formate cluster (`C2H2NaO4-`) are both
+  112.9856 and are different species. They stay two rows, and the app lists them side by side.
+* The (name, adduct-string) pair is not. The sodiated formic acid dimer arrives as
+  `[2M+Na-2H]-`, `[M2+Na-2H]-`, `[M2+Na-H2]-` and as the whole cluster baked into the "neutral"
+  with adduct `[M]-`, under two different compound names. All four are one ion.
+
+`canonical_adduct()` puts the notation into one house style -- multiplier before M, bare sign at
+1+, additions before losses, additions by increasing mass with the charge carrier last, losses
+heaviest first, repeats collapsed into a count, standard condensed shorthands (`CH3OH`, `HCOO`,
+`CH3COO`, `TFA`). It is a notational normal form only: it never changes what the ion is, so
+`[M-H2O-H]-` is NOT rewritten to `[M-H3O]-` even though the two are the same composition.
+
+Merging keeps every alternative rather than discarding it, because "TFA anion from the
+mobile-phase additive" and "TFA anion from the sodium trifluoroacetate calibrant" are the same
+ion from different sources and that source knowledge is the point of the resource. The primary
+record is chosen as a whole (so name, neutral formula and adduct stay a coherent triple) by:
+observed before predicted, m/z recomputed before m/z merely reported, higher confidence, more
+standard adduct notation, fewer QC flags, longer notes. Confidence takes the best value in the
+group; a category disagreement is surfaced as `merged_category_conflict:...` in `qc_flags`.
+
 ## Published artefacts
 
 `output/contaminants_master_<ts>.tsv` (shipped as `data/contaminants.tsv`) is the merged,
-m/z-resolved table: 35 columns, one row per unique ion. It carries the 18 part columns plus
+m/z-resolved table: 39 columns, one row per unique ion. It carries the 18 part columns plus
 computed mass/ladder columns and the accumulated provenance columns `n_records`, `provenance`,
 `source_types`, `references` (` || `-separated), `record_ids` (`;`-separated) and `qc_flags`.
+
+Four columns hold the ion identity and what the merge preserved:
+
+| column | meaning |
+|--------|---------|
+| `ion_formula` | Hill-notation composition of the ION -- the merge key. Isotope-labelled adduct terms are bracketed (`C2H3[63Cu]N`) |
+| `alt_names` | `;`-separated other compound names that give rise to this same ion |
+| `alt_origins` | `;`-separated other reported `common_source` values |
+| `alt_adducts` | `;`-separated other adduct notations seen for it, qualified with the neutral they were written from when that differs (`[M]- of C2H2NaO4`) |
 
 `site/data/contaminants.json` (shipped as `data/contaminants.json`) is the columnar bundle the
 web app loads. Shape:
 
 ```
-{ "fields": [...32 short keys...], "rows": [[...], ...], "meta": {...} }
+{ "fields": [...36 short keys...], "rows": [[...], ...], "meta": {...} }
 ```
 
 Each row is an array positionally matching `fields`. Three fields carry provenance and search
-keys:
+keys, and four carry ion identity:
 
 | field | type | meaning |
 |-------|------|---------|
 | `refs` | array of integers | indices into `meta.refTable`; `[]` when the row has none |
 | `syn`  | string | `;`-separated synonyms, `""` when none |
 | `rid`  | string | `;`-separated source `record_id`s |
+| `ionf` | string | `ion_formula` -- the ion's elemental composition |
+| `altn` | string | `;`-separated other compound names for this ion |
+| `alto` | string | `;`-separated other reported origins |
+| `alta` | string | `;`-separated other adduct notations |
+
+New fields are appended to the END of `fields`, and the app reads optional columns by name, so a
+browser holding an older cached bundle still loads.
 
 `meta.refTable` is an array of distinct reference strings. Reference text is interned because it
 is highly repetitive -- 778 distinct strings across ~9,200 row-level occurrences -- so inlining

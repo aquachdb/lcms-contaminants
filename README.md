@@ -4,8 +4,8 @@
 
 Type the *m/z* of a peak you cannot explain and find out what it is.
 
-A curated, exact-mass-validated compendium of **6,343 LC-MS contaminant and
-background ions** covering 2,671 compounds, plus a browser-based tool for
+A curated, exact-mass-validated compendium of **5,964 LC-MS contaminant and
+background ions** covering 2,633 compounds, plus a browser-based tool for
 identifying an unknown ion from its mass, charge state and isotope envelope.
 
 Everything runs client-side. **Nothing you type or paste is uploaded**, which
@@ -13,19 +13,19 @@ matters when peak lists are confidential.
 
 ## What makes this different
 
-**Masses are computed rather than transcribed — for 82% of the table, and the
-rest says so.** 5,182 of 6,343 ions carry a molecular formula and adduct, and
+**Masses are computed rather than transcribed — for 81% of the table, and the
+rest says so.** 4,810 of 5,964 ions carry a molecular formula and adduct, and
 their m/z is recalculated from those with the electron mass applied; independent
 audit found the maximum disagreement between stored and recomputed values to be
-5×10⁻⁵ Da, with none beyond 0.0001 Da. Of the remainder, 1,004 carry the value
-their source published and 127 only a nominal integer mass; both are labelled on
+5×10⁻⁵ Da, with none beyond 0.0001 Da. Of the remainder, 1,124 carry the value
+their source published, 123 of them only a nominal integer mass; both are labelled on
 every result, and nominal ones display as `~45` rather than as a false exact
 mass. Recomputation caught real errors in published tables — including widely
 quoted values that omit the electron mass, and a database whose DEHP entry is
 actually diisooctyl phthalate.
 
-59% of entries rest on domain knowledge cross-checked against this literature
-rather than on a single citable table. Within that, **1,329 rows (21%) are
+58% of entries rest on domain knowledge cross-checked against this literature
+rather than on a single citable table. Within that, **1,083 rows (18%) are
 computed adduct forms** — formate, acetate, chloride and deprotonated ions
 derived by rule from a contaminant whose structure is verified, rather than ions
 anyone has reported observing. They exist because negative-mode coverage was the
@@ -50,6 +50,14 @@ all sit at distinct offsets near +1, and at high resolution their *exact* masses
 name the element outright. A+2 likewise separates ³⁴S, ³⁷Cl and ⁸¹Br from two
 ¹³C. And peaks *below* the base peak identify Fe, Cr, Ti, B and Li — the signal
 most tools have nowhere to put.
+
+**One row per ion, not per spelling.** `[2M+Na-2H]-` and `[M2+Na-2H]-` are the
+same ion; so is a cluster written as its own neutral. Rows are merged on the
+ion's *elemental composition*, derived from formula and adduct, so the sodiated
+formic-acid dimer at 112.9856 is one result instead of four. Merging keeps what
+made the rows distinct: every compound that gives rise to the ion and every
+source it has been traced to are preserved on the card, because an ion arising
+from three different contaminants is information, not clutter.
 
 **It says what it does not know.** Isobaric pairs are always shown side by side.
 Mass alone cannot separate trifluoroacetate from a sodium formate cluster, and
