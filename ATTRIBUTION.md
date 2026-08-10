@@ -61,7 +61,13 @@ source under that source's terms.
 ## Structures and properties
 
 InChIKeys, PubChem CIDs and XLogP values come from PubChem (NCBI), which places
-no licence restriction on its own computed content.
+no licence restriction on its own computed content. CIDs were resolved through
+PUG REST by full InChIKey, within the documented 5 requests/second limit.
+
+The 2D depictions in `struct/` were drawn here with [RDKit](https://www.rdkit.org/)
+(BSD-3-Clause) from the structures resolved above. They are our own rendering of a
+public structure, not a copy of anyone's image, and are covered by this
+repository's data licence.
 
 ## Corrections
 

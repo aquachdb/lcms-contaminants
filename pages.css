@@ -27,6 +27,50 @@
   display: block; min-height: 44px; padding: 11px 2px; font-size: .92rem;
 }
 .lp-links .lp-plain { color: var(--muted); }
+/* Structure depictions. The SVG is INLINED, so `color` cascades into it and the
+   drawing follows the site's theme -- including the manual toggle, which an
+   <img>-loaded SVG could never see. The aspect ratio is fixed by the file's own
+   viewBox; height:auto here keeps it locked while the width is fluid. */
+.lp-struct {
+  margin: 14px 0 0; padding: 12px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface-2);
+  color: var(--text); text-align: center;
+}
+.lp-struct svg { width: 100%; max-width: 340px; height: auto; display: inline-block; }
+.lp-struct figcaption {
+  font-size: .78rem; color: var(--muted); margin-top: 8px; text-align: left;
+}
+.lp-struct-grid {
+  list-style: none; margin: 10px 0 0; padding: 0; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px;
+}
+.lp-struct-grid li { border: 1px solid var(--border); border-radius: var(--radius); }
+.lp-struct-grid a, .lp-struct-grid .lp-plain {
+  display: block; padding: 8px; min-height: 44px; color: var(--text);
+  text-decoration: none;
+}
+.lp-struct-grid svg { width: 100%; height: auto; display: block; }
+.lp-struct-name {
+  display: block; font-size: .76rem; color: var(--muted); margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+/* The one control a reader presses to verify the identification, so it gets a
+   real 44px target rather than being an inline link inside a caption. */
+.lp-out { margin: 10px 0 0; }
+/* inline-flex, not line-height:44px -- the label wraps at 390px and a 44px line
+   box would then render as two very tall lines with the text floating apart. */
+.lp-pubchem {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 8px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text); font-size: .88rem;
+  font-weight: 600; text-decoration: none; line-height: 1.35;
+}
+.lp-pubchem:hover { border-color: var(--accent); }
+.lp-inline-out { display: inline-block; min-height: 40px; line-height: 40px; }
+.lp-cid {
+  display: inline-flex; align-items: center; min-height: 44px;
+  font-family: var(--mono); font-size: .82rem; white-space: nowrap;
+}
 .lp-cols { columns: 2; column-gap: 26px; }
 .lp-cols li { break-inside: avoid; }
 .lp-dense a { font-size: .86rem; font-family: var(--mono); }

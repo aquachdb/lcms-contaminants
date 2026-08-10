@@ -228,31 +228,11 @@ const splitList = s => (s || '').split(';').map(x => x.trim()).filter(Boolean);
    ion's elemental composition, so a single row can stand for several
    contaminants, several reported origins and several adduct spellings — the
    trifluoroacetate anion arrives both as the mobile-phase additive and as the
-   sodium trifluoroacetate calibrant. That is the most useful thing this data
-   knows about a peak, so it is shown on the card rather than hidden: an ion with
-   three possible sources is three leads, not clutter. */
-function altBlock(r) {
-  const names = splitList(optCol(r, 'altn'));
-  const origins = splitList(optCol(r, 'alto'));
-  const notations = splitList(optCol(r, 'alta'));
-  if (!names.length && !origins.length && !notations.length) return null;
-  const box = el('div', 'alt-info');
-  const line = (label, items, mono) => {
-    if (!items.length) return;
-    const p = el('p');
-    p.append(el('b', null, label + ' '));
-    p.append(el('span', mono ? 'mono' : null,
-      items.slice(0, 6).join(' · ') +
-      (items.length > 6 ? ' · +' + (items.length - 6) + ' more' : '')));
-    box.append(p);
-  };
-  line('Also arises from:', names);
-  line('Also reported from:', origins);
-  line('Also written as:', notations, true);
-  return box;
-}
+   sodium trifluoroacetate calibrant. Those alternatives are extra leads on the
+   peak, but they are not the answer, so they live in the card's disclosure
+   drawer (detailDrawer) rather than on its face.
 
-/* Citations. `refs` is an array of indices into meta.refTable, not a string,
+   Citations. `refs` is an array of indices into meta.refTable, not a string,
    so it cannot go through optCol. Every step is feature-detected and
    bounds-checked: a browser holding a stale cached bundle can carry indices
    the current refTable does not reach, and "undefined | undefined" printed as
@@ -293,15 +273,223 @@ function refNode(str) {
   return span;
 }
 
-function citationBlock(r) {
-  const refs = refsOf(r);
-  if (!refs.length) return null;
-  const b = el('div', 'ev-block');
-  b.append(el('div', 'ev-title', refs.length === 1 ? 'Source' : 'Sources (' + refs.length + ')'));
+/* ==================================================== credibility signals
+   cid / nref / ikey are OPTIONAL columns added by the data pipeline. They are
+   read through optCol's STRING key, never as F.<name>: tools/check_site.py
+   rightly fails any F.<name> the shipped data does not define, and this code
+   has to work against a bundle that predates the columns. */
+const CID_RE = /^\d{1,12}$/;
+function pubchemUrl(r) {
+  // Only a real CID becomes a link. A name-based search URL would be a
+  // fabricated citation -- it resolves to whatever PubChem's search happens to
+  // return, which is not the same claim as "this compound is CID 8343".
+  const cid = optCol(r, 'cid').trim();
+  return CID_RE.test(cid) ? 'https://pubchem.ncbi.nlm.nih.gov/compound/' + cid : '';
+}
+const IKEY_RE = /^[A-Z]{14}$/;
+function structPath(r) {
+  const k = optCol(r, 'ikey').trim().toUpperCase();
+  return IKEY_RE.test(k) ? 'struct/' + k + '.svg' : '';
+}
+/* How many DISTINCT sources attest this ion. `nref` is the pipeline's collapsed
+   count -- the many re-encodings of Keller et al. 2008 count once. Without the
+   column we fall back to counting the citation strings we hold, and when we
+   hold no citation machinery at all we return null and say nothing, because
+   "0 references" and "we cannot tell" are different statements. */
+function refCount(r) {
+  const n = optCol(r, 'nref').trim();
+  if (/^\d+$/.test(n)) return parseInt(n, 10);
+  if (F.refs != null && REFTAB.length) return refsOf(r).length;
+  return null;
+}
+
+/* The visible attestation signal. Two rules matter here:
+   - a count is evidence that people have REPORTED this ion, not that the
+     assignment is right, so the wording says "sources report", never "correct";
+   - a computed row (cluster, generated composition) has no references by
+     construction and must say so, otherwise arithmetic borrows the credibility
+     of the library row sitting above it. */
+function signalsBlock(rows, layer) {
+  const box = el('div', 'signals');
+  let any = false;
+  if (layer && layer !== 'library') {
+    box.append(chip('computed — no published reference', 'warn'));
+    return box;
+  }
+  const list = rows.filter(Boolean);
+  if (!list.length) return null;
+  const primary = list[0];
+
+  let n = null;
+  list.forEach(r => { const c = refCount(r); if (c != null) n = (n == null) ? c : Math.max(n, c); });
+  if (n != null) {
+    // MAX, not SUM: the merged rows are the same compound, so their reference
+    // lists overlap and adding them would invent attestation that is not there.
+    const c = chip(n === 0 ? 'no published reference recorded'
+                 : n === 1 ? '1 distinct reference'
+                 : n + ' distinct references',
+                 n >= 2 ? 'good' : n === 0 ? 'warn' : '');
+    c.title = 'Distinct published sources, after the re-encodings of one dataset are collapsed. ' +
+      'Attestation, not proof: it says people have reported this ion, not that this assignment is right.';
+    box.append(c); any = true;
+  }
+  const url = pubchemUrl(primary);
+  if (url) {
+    const a = el('a', 'pubchem-link', 'PubChem CID ' + optCol(primary, 'cid').trim());
+    a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    box.append(a); any = true;
+  }
+  const fig = structureFigure(primary);
+  if (fig) { box.append(fig); any = true; }
+  return any ? box : null;
+}
+
+/* The structure thumbnail. The box is sized in CSS before the file is fetched,
+   so a slow or missing SVG cannot reflow the card, and a file that 404s hides
+   itself rather than leaving the browser's broken-image glyph. */
+function structureFigure(r) {
+  const src = structPath(r);
+  if (!src) return null;
+  const wrap = el('div', 'struct-wrap');
+  const img = document.createElement('img');
+  img.className = 'struct-thumb';
+  img.loading = 'lazy';
+  img.decoding = 'async';
+  img.width = 72; img.height = 72;
+  img.alt = 'Chemical structure of ' + (r[F.name] || 'this compound');
+  img.addEventListener('error', () => { wrap.hidden = true; });
+  img.src = src;
+  wrap.append(img);
+  return wrap;
+}
+
+/* ---------------------------------------------------------------- disclosure
+   Every card's supporting material lives in a <details>, the same drawer the
+   search panel already uses. The open/closed state is keyed by content rather
+   than by position so a debounced re-render of the SAME query does not slam a
+   drawer the user just opened. */
+const DRAWER_STATE = new Map();
+function drawer(key, title, defaultOpen) {
+  const d = el('details');
+  const st = key ? DRAWER_STATE.get(key) : undefined;
+  d.open = (st === undefined) ? !!defaultOpen : st;
+  if (key) d.addEventListener('toggle', () => {
+    if (DRAWER_STATE.size > 400) DRAWER_STATE.clear();
+    DRAWER_STATE.set(key, d.open);
+  });
+  d.append(el('summary', null, title));
+  return d;
+}
+function evBlock(title, items, cls) {
+  if (!items || !items.length) return null;
+  const b = el('div', 'ev-block' + (cls ? ' ' + cls : ''));
+  b.append(el('div', 'ev-title', title));
   const ul = el('ul', 'ev-list');
-  refs.forEach(s => { const li = el('li'); li.append(refNode(s)); ul.append(li); });
+  items.forEach(t => ul.append(el('li', null, t)));
   b.append(ul);
   return b;
+}
+
+/* ================================== render-time merge of near-duplicate rows
+   The pipeline merges rows on ION COMPOSITION. Rows that arrive without a
+   formula or an adduct cannot be keyed that way, so the same compound survives
+   twice: "Polyethylene glycol n=8" beside a bare "PEG", and a source table's
+   misspelled "Pthalic Anhydride" beside the correct spelling. Those are one
+   answer, not two.
+
+   The rule is deliberately conservative. Two rows whose ion compositions are
+   both KNOWN and DIFFERENT are never merged, which is exactly what keeps
+   trifluoroacetate (C2F3O2-) and the sodium formate cluster (C2H2NaO4-) -- both
+   112.9856 -- as the two separate cards they have to be. */
+const UNIDENTIFIED_RE = /^\s*(unassigned|unknown|unidentified)\b/i;
+const isUnidentified = r =>
+  UNIDENTIFIED_RE.test(r[F.name] || '') && !r[F.formula] && !optCol(r, 'ionf');
+
+function normName(s) {
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')          // "(in-source fragment of ...)" is a gloss
+    .replace(/\bn\s*=\s*\d+\b/g, ' ')    // oligomer index: PEG n=8 and PEG are one name
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/\d+$/, '');
+}
+const NAMEKEYS = new WeakMap();
+function nameKeys(r) {
+  let s = NAMEKEYS.get(r);
+  if (s) return s;
+  s = new Set();
+  const add = v => { const k = normName(v); if (k.length >= 3) s.add(k); };
+  add(r[F.name]);
+  splitList(optCol(r, 'altn')).forEach(add);
+  splitList(optCol(r, 'syn')).forEach(add);
+  NAMEKEYS.set(r, s);
+  return s;
+}
+/* One insertion, deletion or substitution apart -- enough for "Pthalic" vs
+   "Phthalic", too tight to join two real compounds. Short strings are excluded
+   because at five characters an edit distance of one is not evidence of
+   anything. */
+function within1(a, b) {
+  if (a === b) return true;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1 || Math.min(la, lb) < 6) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < la && j < lb) {
+    if (a.charAt(i) === b.charAt(j)) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (la > lb) i++; else if (lb > la) j++; else { i++; j++; }
+  }
+  if (i < la || j < lb) edits++;
+  return edits <= 1;
+}
+function nameOverlap(r1, r2) {
+  const k1 = nameKeys(r1), k2 = nameKeys(r2);
+  for (const a of k1) if (k2.has(a)) return true;
+  for (const a of k1) { if (a.length < 6) continue; for (const b of k2) if (within1(a, b)) return true; }
+  return false;
+}
+
+function sameCompoundRow(a, b) {
+  if (a[F.pol] !== b[F.pol]) return false;
+  if (String(a[F.charge]) !== String(b[F.charge])) return false;
+  const ma = a[F.mz], mb = b[F.mz];
+  if (!isFinite(ma) || !isFinite(mb)) return false;
+  // proximity, not the search window: at a nominal +-0.5 Da query the window
+  // spans hundreds of unrelated compounds and must never authorise a merge
+  if (Math.abs(ma - mb) > Math.max(0.0015, ma * 4e-6)) return false;
+  const ia = optCol(a, 'ionf'), ib = optCol(b, 'ionf');
+  if (ia && ib && ia !== ib) return false;              // known, and different
+  const fa = a[F.formula] || '', fb = b[F.formula] || '';
+  if (fa && fb && fa !== fb) return false;
+  const ua = isUnidentified(a), ub = isUnidentified(b);
+  if (ua && ub) return true;      // two nameless background reports at one mass
+  if (ua !== ub) return false;    // never fold a named ion into a nameless one
+  if (fa && fa === fb) return true;
+  if (ia && ia === ib) return true;
+  const ca = a[F.cat] || '', cb = b[F.cat] || '';
+  if (ca && cb && ca !== cb) return false;
+  return nameOverlap(a, b);
+}
+
+const rowRichness = r => (optCol(r, 'ionf') ? 4 : 0) + (r[F.formula] ? 3 : 0) +
+  (r[F.adduct] ? 2 : 0) + (optCol(r, 'cid') ? 1 : 0) + Math.min(r[F.nsrc] || 1, 9) * 0.5;
+
+/* Groups keep the order of their FIRST member, so the existing ranking is not
+   disturbed; inside a group the richest row leads and the rest become
+   alternative names on its card. */
+function mergeRows(rows) {
+  const groups = [];
+  for (const r of rows) {
+    let placed = false;
+    for (const g of groups) {
+      for (const o of g) if (sameCompoundRow(o, r)) { g.push(r); placed = true; break; }
+      if (placed) break;
+    }
+    if (!placed) groups.push([r]);
+  }
+  return groups.map(g => {
+    const s = g.slice().sort((x, y) => rowRichness(y) - rowRichness(x));
+    return { row: s[0], dupes: s.slice(1) };
+  });
 }
 
 const prettyCat = c => c.replace(/_/g, ' ').replace(/\b(peg|ppg|ms1|ms2)\b/gi, m => m.toUpperCase());
@@ -687,11 +875,31 @@ function searchMz(mz, tol, polarity) {
 
 function layerLibrary(obs, iso) {
   const hits = searchMz(obs.mz, obs.tol, obs.polarity);
+  // merge before slicing, so folding two rows together makes room for a real
+  // third answer rather than leaving a gap
+  const groups = mergeRows(hits.slice(0, 20).map(h => h.r)).slice(0, 12);
   const out = [];
-  for (const h of hits.slice(0, 12)) {
-    const r = h.r;
+  for (const g of groups) {
+    const r = g.row;
     const ev = ['matches a curated library entry to ' + ppmOf(obs.mz, r[F.mz]).toFixed(1) + ' ppm'];
-    if ((r[F.nsrc] || 1) > 1) ev.push(r[F.nsrc] + ' independent sources report this ion');
+    if (g.dupes.length) {
+      const names = [...new Set(g.dupes.map(d => d[F.name]).filter(n => n && n !== r[F.name]))];
+      if (names.length) ev.push('the source tables carry this same ion under ' +
+        (names.length === 1 ? 'a second name' : names.length + ' further names') +
+        ' — ' + names.join(', ') + ' — folded into this one card');
+      else ev.push(g.dupes.length + ' further source row(s) for this same ion were folded into this card');
+    }
+    // nsrc counts SOURCE TABLES, nref counts DISTINCT references after the
+    // re-encodings of one dataset are collapsed. Both are useful and they are
+    // different numbers, so neither may be called "sources" on its own.
+    if ((r[F.nsrc] || 1) > 1) {
+      const nr = refCount(r);
+      ev.push(r[F.nsrc] + ' source tables list this ion' +
+        (nr != null && nr !== r[F.nsrc]
+          ? ', which collapse to ' + nr + ' distinct reference' + (nr === 1 ? '' : 's') +
+            ' once the re-encodings of one dataset are counted once'
+          : ''));
+    }
     if (r[F.origin]) ev.push('reported origin: ' + r[F.origin]);
     // the same ion from a different contaminant is a different lead, and the
     // whole point of merging on ion identity was to keep those rather than
@@ -735,42 +943,82 @@ function layerLibrary(obs, iso) {
       cav.push('m/z as published by the source; we hold no formula for this ion, ' +
                'so it has not been independently recomputed here');
     }
+    // A row with no identity is a real observation -- someone saw an
+    // unexplained background ion at this mass and published it -- but it is not
+    // an answer, so it never outranks a named one and it says what it is.
+    let identity = r[F.name], junkPenalty = 0;
+    if (isUnidentified(r)) {
+      junkPenalty = 1.0;
+      conf = 'low';
+      if (g.dupes.some(d => d[F.name] !== r[F.name])) identity = 'unassigned background ion';
+      const where = [r].concat(g.dupes).map(d =>
+        fmt(d[F.mz]) + (d[F.origin] ? ' (' + d[F.origin] + ')' : ''));
+      cav.push('No identity was assigned to this report. It records only that an unexplained ' +
+        'background ion was seen at ' + where.join(' and ') + ' — useful as corroboration that ' +
+        'something sits at this mass, not as an assignment.');
+    }
     out.push({
-      identity: r[F.name], species: r[F.adduct] || '', formula: r[F.formula] || '',
+      identity: identity, species: r[F.adduct] || '', formula: r[F.formula] || '',
       calc: r[F.mz], basis: basis,
       ppm: basis === 'nominal' ? null : ppmOf(obs.mz, r[F.mz]),
       layer: 'library', confidence: conf,
-      evidence: ev, caveats: cav, row: r,
-      score: Math.abs(ppmOf(obs.mz, r[F.mz])) / Math.max(1, obs.ppmTol) - prominence(r)
+      evidence: ev, caveats: cav, row: r, dupes: g.dupes,
+      ionf: optCol(r, 'ionf'),
+      score: Math.abs(ppmOf(obs.mz, r[F.mz])) / Math.max(1, obs.ppmTol) - prominence(r) + junkPenalty
     });
   }
   return out;
 }
 
 /* ================================================ layer 2 — computed clusters */
+/* `f` is the elemental composition each unit contributes. It is what makes two
+   framings of the SAME ion recognisable as one: 2 formic acid - H + Na - H and
+   formic acid + formate + Na - H are both C2H2NaO4, and ammonia from ammonium
+   formate is the same NH3 as ammonia from ammonium acetate. Without a
+   composition the code could only compare label strings, which differ. */
 const SOLVENTS = {
-  water: { label: 'water', abbr: 'H₂O', mass: 18.0105646 },
-  acn:   { label: 'acetonitrile', abbr: 'ACN', mass: 41.0265491 },
-  meoh:  { label: 'methanol', abbr: 'MeOH', mass: 32.0262147 },
-  ipa:   { label: 'isopropanol', abbr: 'IPA', mass: 60.0575149 },
-  fa:    { label: 'formic acid', abbr: 'FA', mass: 46.0054793 },
-  aa:    { label: 'acetic acid', abbr: 'AcOH', mass: 60.0211294 },
-  amfo:  { label: 'ammonia (from ammonium formate)', abbr: 'NH₃', mass: 17.0265491 },
-  amac:  { label: 'ammonia (from ammonium acetate)', abbr: 'NH₃', mass: 17.0265491 },
-  tfa:   { label: 'trifluoroacetic acid', abbr: 'TFA', mass: 113.9928639 }
+  water: { label: 'water', abbr: 'H₂O', mass: 18.0105646, f: { H: 2, O: 1 } },
+  acn:   { label: 'acetonitrile', abbr: 'ACN', mass: 41.0265491, f: { C: 2, H: 3, N: 1 } },
+  meoh:  { label: 'methanol', abbr: 'MeOH', mass: 32.0262147, f: { C: 1, H: 4, O: 1 } },
+  ipa:   { label: 'isopropanol', abbr: 'IPA', mass: 60.0575149, f: { C: 3, H: 8, O: 1 } },
+  fa:    { label: 'formic acid', abbr: 'FA', mass: 46.0054793, f: { C: 1, H: 2, O: 2 } },
+  aa:    { label: 'acetic acid', abbr: 'AcOH', mass: 60.0211294, f: { C: 2, H: 4, O: 2 } },
+  amfo:  { label: 'ammonia (from ammonium formate)', abbr: 'NH₃', mass: 17.0265491,
+           f: { N: 1, H: 3 }, additive: 'ammonium formate' },
+  amac:  { label: 'ammonia (from ammonium acetate)', abbr: 'NH₃', mass: 17.0265491,
+           f: { N: 1, H: 3 }, additive: 'ammonium acetate' },
+  tfa:   { label: 'trifluoroacetic acid', abbr: 'TFA', mass: 113.9928639, f: { C: 2, H: 1, F: 3, O: 2 } }
 };
 const CATIONS = [
-  { name: 'H', mass: PROTON }, { name: 'Na', mass: EL.Na - ELECTRON },
-  { name: 'K', mass: EL.K - ELECTRON },
-  { name: 'NH4', mass: EL.N + 4 * EL.H - ELECTRON, needs: ['amfo', 'amac'] }
+  { name: 'H', mass: PROTON, f: { H: 1 } },
+  { name: 'Na', mass: EL.Na - ELECTRON, f: { Na: 1 } },
+  { name: 'K', mass: EL.K - ELECTRON, f: { K: 1 } },
+  { name: 'NH4', mass: EL.N + 4 * EL.H - ELECTRON, f: { N: 1, H: 4 }, needs: ['amfo', 'amac'] }
 ];
 const ANIONS = [
-  { name: '-H', mass: -PROTON, label: '-H' },
-  { name: '+Cl', mass: EL.Cl + ELECTRON, label: '+Cl' },
-  { name: '+HCOO', mass: EL.C + EL.H + 2 * EL.O + ELECTRON, label: '+HCOO', needs: ['fa', 'amfo'] },
-  { name: '+CH3COO', mass: 2 * EL.C + 3 * EL.H + 2 * EL.O + ELECTRON, label: '+CH3COO', needs: ['aa', 'amac'] },
-  { name: '+CF3COO', mass: 2 * EL.C + 3 * EL.F + 2 * EL.O + ELECTRON, label: '+CF3COO', needs: ['tfa'] }
+  { name: '-H', mass: -PROTON, label: '-H', f: { H: -1 } },
+  { name: '+Cl', mass: EL.Cl + ELECTRON, label: '+Cl', f: { Cl: 1 } },
+  { name: '+HCOO', mass: EL.C + EL.H + 2 * EL.O + ELECTRON, label: '+HCOO', f: { C: 1, H: 1, O: 2 },
+    needs: ['fa', 'amfo'] },
+  { name: '+CH3COO', mass: 2 * EL.C + 3 * EL.H + 2 * EL.O + ELECTRON, label: '+CH3COO',
+    f: { C: 2, H: 3, O: 2 }, needs: ['aa', 'amac'] },
+  { name: '+CF3COO', mass: 2 * EL.C + 3 * EL.F + 2 * EL.O + ELECTRON, label: '+CF3COO',
+    f: { C: 2, F: 3, O: 2 }, needs: ['tfa'] }
 ];
+
+/* The ion this combination actually produces, in Hill notation. Returns '' when
+   the arithmetic would need a negative atom count (a carrier stripping an H the
+   cluster does not have), because that is not a composition and must not be
+   used as a dedup key. */
+function clusterComposition(units, pair, na) {
+  const c = {};
+  const add = f => { for (const e in f) c[e] = (c[e] || 0) + f[e]; };
+  for (const u of units) add(SOLVENTS[u].f);
+  for (const p of pair) add(p.f);
+  if (na) add({ Na: na, H: -na });
+  for (const e in c) { if (c[e] < 0) return ''; if (!c[e]) delete c[e]; }
+  return Object.keys(c).length ? hillFormula(c) : '';
+}
 
 function selectedSolvents() {
   const boxes = document.querySelectorAll('#solvents input[type=checkbox]');
@@ -830,6 +1078,7 @@ function layerClusters(obs, iso) {
             (z > 1 ? z : '') + (obs.polarity === 'neg' ? '-' : '+');
           if (seen[species]) continue;
           seen[species] = 1;
+          const comp = clusterComposition(units, pair, na);
           const solventNames = [...new Set(units)].map(u => SOLVENTS[u].label);
           const ev = ['computed from the mobile phase you selected: ' +
             (solventNames.length ? solventNames.join(' + ') : 'charge carrier only') +
@@ -855,9 +1104,11 @@ function layerClusters(obs, iso) {
           }
           out.push({
             identity: (solventNames.length ? solventNames.join(' + ') : 'charge carrier') + ' cluster',
-            species: species, formula: '', calc: calc, ppm: ppmOf(obs.mz, calc),
+            species: species, formula: comp, ionf: comp, calc: calc, ppm: ppmOf(obs.mz, calc),
             layer: 'cluster', confidence: units.length > 1 ? 'medium' : 'low',
             evidence: ev, caveats: cav,
+            ingredients: units.map(u => SOLVENTS[u].label),
+            additives: [...new Set(units.map(u => SOLVENTS[u].additive).filter(Boolean))],
             score: 0.5 + Math.abs(ppmOf(obs.mz, calc)) / Math.max(1, obs.ppmTol) + 0.15 * units.length
           });
         }
@@ -865,7 +1116,48 @@ function layerClusters(obs, iso) {
     }
   }
   out.sort((a, b) => a.score - b.score);
-  return out.slice(0, 8);
+  return dedupeClusters(out).slice(0, 8);
+}
+
+/* One ION, one card.
+   The enumeration walks PATHS through the mobile phase, and several paths reach
+   the same ion: [2FA-H+Na-H]- and [FA+HCOO+Na-H]- are both C2H2NaO4-, and
+   2 x ammonia is the same N2H6 whether both molecules came from ammonium
+   formate or one from each additive. Emitting a card per path told the user
+   there were two answers when there is one. The key is the resulting ion --
+   composition, charge and polarity -- and where a species really is reachable
+   several ways that fact goes on the single surviving card, once. */
+function dedupeClusters(list) {
+  const byKey = new Map();
+  const kept = [];
+  for (const x of list) {
+    // no composition (a carrier stripping an atom the cluster lacks) falls back
+    // to the exact mass, which is still the ion rather than the wording
+    const key = (x.ionf || 'm' + x.calc.toFixed(4)) + '|' + x.species.slice(-2);
+    const first = byKey.get(key);
+    if (!first) { byKey.set(key, x); x.alsoVia = []; kept.push(x); continue; }
+    const ing = x.ingredients.length ? x.ingredients.join(' + ') : 'charge carrier only';
+    if (first.alsoVia.indexOf(ing) < 0 && ing !== first.ingredients.join(' + '))
+      first.alsoVia.push(x.species + ' — ' + ing);
+    x.additives.forEach(a => { if (first.additives.indexOf(a) < 0) first.additives.push(a); });
+  }
+  for (const x of kept) {
+    if (x.alsoVia && x.alsoVia.length) {
+      x.evidence.push('the same ion — ' + (x.ionf || 'this exact mass') + ' — is reachable by ' +
+        (x.alsoVia.length + 1) + ' routes through the mobile phase you selected, also as ' +
+        x.alsoVia.join('; ') + '. It is one ion, so it is listed once.');
+    }
+    if (x.additives.length > 1) {
+      // the card must not name one buffer when either would give this ion
+      x.identity = x.identity.replace(/ammonia \(from [^)]*\)/g,
+        'ammonia (from ' + x.additives.join(' or ') + ')');
+      x.evidence.push('the neutral it clusters with is available from more than one additive you ' +
+        'ticked (' + x.additives.join(' and ') + '), so this assignment does not tell you which ' +
+        'buffer it came from.');
+    }
+    delete x.alsoVia;
+  }
+  return kept;
 }
 const CARBONS = { water: 0, acn: 2, meoh: 1, ipa: 3, fa: 1, aa: 2, amfo: 0, amac: 0, tfa: 2 };
 const countCarbons = units => units.reduce((s, u) => s + CARBONS[u], 0);
@@ -1072,12 +1364,53 @@ function generateFormulas(obs, iso, maxResults) {
     }
   }
   out.sort((a, b) => a.score - b.score || Math.abs(a.ppm) - Math.abs(b.ppm));
-  return out.slice(0, maxResults || 8);
+  const res = out.slice(0, maxResults || 8);
+  res.total = out.length;      // how many compositions actually fit the window
+  return res;
 }
+
+/* Formula generation is only an answer when the mass window can constrain the
+   composition. At a nominal query -- "371", +-0.5 Da, or anything in unit
+   resolution -- thousands of compositions fit, and printing seven of them with
+   ppm errors to one decimal claims two things that are not true: that the list
+   is a shortlist, and that a ppm error can be computed against a mass the user
+   never supplied. Above these thresholds the layer states how many
+   compositions fit and what extra input would narrow it, and quotes no ppm. */
+const WIDE_WINDOW_DA = 0.05;    // >= this and the query gave at most one decimal
+const UNCONSTRAINED_N = 200;    // more compositions than any shortlist can stand for
 
 function layerFormula(obs, iso) {
   const cands = generateFormulas(obs, iso, 8);
   const z = obs.charge;
+  const total = cands.total || cands.length;
+  const wide = unitResolution() || obs.tol >= WIDE_WINDOW_DA;
+  if (!cands.length) return [];
+
+  if (wide || total > UNCONSTRAINED_N) {
+    const window = obs.tol >= 0.01 ? '± ' + obs.tol.toFixed(3) + ' Da'
+                                   : '± ' + obs.ppmTol.toFixed(0) + ' ppm';
+    const ev = [
+      total + ' elemental compositions of C, H, N, O, S, P, Na, K, Cl, F and Si fit m/z ' + obs.mz +
+        ' ' + window + ' at charge ' + z + ' — and that is the count AFTER the even-electron ' +
+        'parity and chemistry filters and inside this app’s element caps; the unrestricted ' +
+        'number of formulas in a window this wide is larger still',
+      'no shortlist is shown, and no ppm error is quoted: both would claim a precision ' +
+        'this query does not carry — a ppm figure here would be measured against a mass you ' +
+        'did not supply'
+    ];
+    if (unitResolution()) ev.push('you are in unit-resolution mode, where the window is fixed at ' +
+      '± 0.5 Da however precisely the value is typed');
+    const cav = ['To narrow this, give the m/z to four decimals (371.1012, not 371) — that alone ' +
+      'cuts the list by roughly two orders of magnitude. Then add the B+1 m/z and its intensity: ' +
+      'the 13C count fixes the carbon number, and the B+2 intensity settles S, Cl, Br, K and Si.'];
+    return [{
+      identity: 'Formula generation cannot narrow this at ' + window,
+      species: '', formula: '', calc: null, ppm: null, layer: 'formula',
+      confidence: 'low', unconstrained: true,
+      evidence: ev, caveats: cav, score: 3.5
+    }];
+  }
+
   return cands.map(c => {
     const key = c.formula + '|' + obs.polarity;
     const named = ION_NAMES[key];
@@ -1094,6 +1427,8 @@ function layerFormula(obs, iso) {
       ' that the B+1/B+2 exact mass demanded');
     for (const f of c.flags) ev.push('flagged: ' + f);
     const cav = [];
+    if (total > cands.length) cav.push('This is one of the ' + cands.length + ' best-scoring of ' +
+      total + ' compositions that fit the window — a ranking, not a shortlist of everything possible.');
     if (!iso.a1pct && !iso.a2pct) cav.push('No measured isotope intensities, so this is constrained by mass and ' +
       'chemistry only. Entering B+1 and B+2 typically removes most of these candidates.');
     if (c.pen > 3) cav.push('chemically unusual for a background ion — treat as a long shot.');
@@ -1339,6 +1674,74 @@ function chip(text, cls) { return el('span', 'chip ' + (cls || ''), text); }
 const LAYER_LABEL = { library: 'library', cluster: 'mobile-phase cluster',
   formula: 'formula generation', companion: 'companion logic' };
 
+/* Everything a card knows beyond the answer itself -- alternative names and
+   notations, the provenance grid, the series links and the citations -- behind
+   ONE disclosure. One drawer rather than three: a card carrying three summaries
+   is three tap targets for a single idea, and on a phone each of those has to
+   be 44 px tall. */
+function detailDrawer(rows, obs, key) {
+  const r = rows[0], dupes = rows.slice(1);
+  const refs = [], seenRef = {};
+  rows.forEach(rr => refsOf(rr).forEach(s => { if (!seenRef[s]) { seenRef[s] = 1; refs.push(s); } }));
+
+  const g = el('div', 'detail-grid');
+  let n = 0;
+  const line = (k, v) => { if (!v && v !== 0) return; n++; const d = el('div');
+    d.append(el('span', 'dk', k), el('span', null, String(v))); g.append(d); };
+  line('Likely origin', r[F.origin]);
+  line('Ion composition', optCol(r, 'ionf'));
+  if (dupes.length) line('Also listed as',
+    [...new Set(dupes.map(d => d[F.name] + ' (m/z ' + fmt(d[F.mz]) + ')'))].join('; '));
+  line('Also arises from', splitList(optCol(r, 'altn')).join(', '));
+  line('Also reported from', splitList(optCol(r, 'alto')).join('; '));
+  line('Also written as', splitList(optCol(r, 'alta')).join(', '));
+  line('Reported by', r[F.src] === 'memory+web' ? 'independent recall and published sources'
+      : r[F.src] === 'web' ? 'published sources' : 'domain knowledge');
+  line('Confidence', r[F.conf]);
+  line('Charge', r[F.charge]);
+  if (r[F.m2] != null) line('Predicted isotopes', 'M+1 ' + r[F.m1] + '% · M+2 ' + r[F.m2] + '%');
+  if (r[F.logp] != null) line('logP (XLogP)', r[F.logp] + ' — expect to elute ' + r[F.elution]);
+  if (r[F.rmd]) line('Relative mass defect', r[F.rmd] + ' ppm');
+  if (r[F.nnb]) line('Competing structures', r[F.nnb] + ' other known compounds within 5 ppm');
+  if (r[F.ms2n]) line('MS2 availability', r[F.ms2n] + ' public spectra');
+  line('Notes', r[F.note]);
+  const ladder = (r[F.fam] && r[F.spacing]) ? r[F.fam] : '';
+  if (!n && !refs.length && !ladder) return null;
+
+  const det = drawer(key, 'Sources, alternative names and details' +
+    (refs.length ? ' · ' + refs.length + ' cited' : ''));
+  if (n) det.append(g);
+  if (ladder) {
+    const l = el('div', 'ladder');
+    l.append(el('strong', null, r[F.fam]));
+    l.append(document.createTextNode(' — members are ' + fmt(r[F.spacing]) + ' apart' +
+      (obs && obs.charge > 1 ? ', i.e. ' + (r[F.spacing] / obs.charge).toFixed(4) +
+        ' in m/z at ' + obs.charge + '+' : '') + '. '));
+    const jump = (mz, label) => {
+      if (!mz) return;
+      const b = el('button', 'ladder-link', label + ' ' + fmt(mz));
+      b.onclick = () => { $('q').value = fmt(mz) + (r[F.pol] === 'neg' ? '-' : '+'); run();
+        window.scrollTo({ top: 0, behavior: 'smooth' }); };
+      l.append(b, document.createTextNode(' '));
+    };
+    jump(r[F.prev_mz], '← previous');
+    jump(r[F.next_mz], 'next →');
+    det.append(l);
+  }
+  if (refs.length) {
+    const b = el('div', 'ev-block');
+    b.append(el('div', 'ev-title', refs.length === 1 ? 'Source' : 'Sources (' + refs.length + ')'));
+    const ul = el('ul', 'ev-list');
+    refs.forEach(s => { const li = el('li'); li.append(refNode(s)); ul.append(li); });
+    b.append(ul);
+    det.append(b);
+  }
+  return det;
+}
+
+/* The answer is the visible part: what it is, where it sits, how it is charged,
+   how far off it is, what class it belongs to, and how well attested it is.
+   The reasoning and the provenance sit behind disclosure. */
 function explanationCard(x, obs) {
   const c = el('div', 'card exp exp-' + x.layer);
   const top = el('div', 'card-top');
@@ -1347,12 +1750,21 @@ function explanationCard(x, obs) {
     x.calc == null ? '—' : (nom ? '~' + Math.round(x.calc) : fmt(x.calc))));
   if (nom) top.append(chip('nominal mass only', 'warn'));
   top.append(el('span', 'card-name', x.identity));
+  // Same false-precision problem the formula layer has: at a nominal query the
+  // ppm error is measured against a mass the user never supplied, and "-613.1
+  // ppm" reads as a precise disagreement rather than "0.23 Da away". Wide
+  // windows therefore get the distance in Daltons.
+  const wideWin = !!obs && obs.tol >= WIDE_WINDOW_DA;
   if (x.ppm != null) top.append(el('span', 'delta',
-    (x.ppm >= 0 ? '+' : '') + x.ppm.toFixed(1) + ' ppm'));
+    (wideWin && x.calc != null)
+      ? (x.calc - obs.mz >= 0 ? '+' : '') + (x.calc - obs.mz).toFixed(3) + ' Da from ' + obs.mz
+      : (x.ppm >= 0 ? '+' : '') + x.ppm.toFixed(1) + ' ppm'));
   c.append(top);
 
   const chips = el('div', 'chips');
   chips.append(chip(LAYER_LABEL[x.layer], 'layer-' + x.layer));
+  if (obs) chips.append(chip((obs.polarity === 'neg' ? 'negative' : 'positive') +
+    (obs.charge > 1 ? ' · charge ' + obs.charge : ''), 'pol-' + (obs.polarity || 'pos')));
   if (x.species) chips.append(chip(x.species, 'mono'));
   if (x.formula) chips.append(chip(x.formula, 'mono'));
   chips.append(chip('confidence: ' + x.confidence,
@@ -1360,69 +1772,32 @@ function explanationCard(x, obs) {
   if (x.row && x.row[F.cat]) chips.append(chip(prettyCat(x.row[F.cat])));
   c.append(chips);
 
-  if (x.evidence && x.evidence.length) {
-    const b = el('div', 'ev-block');
-    b.append(el('div', 'ev-title', 'Evidence'));
-    const ul = el('ul', 'ev-list');
-    x.evidence.forEach(t => ul.append(el('li', null, t)));
-    b.append(ul); c.append(b);
-  }
-  if (x.checks && x.checks.length) {
-    const b = el('div', 'ev-block');
-    b.append(el('div', 'ev-title', 'Look for these next'));
-    const ul = el('ul', 'ev-list');
-    x.checks.forEach(t => ul.append(el('li', null, t)));
-    b.append(ul); c.append(b);
-  }
-  if (x.caveats && x.caveats.length) {
-    const b = el('div', 'ev-block caveats');
-    b.append(el('div', 'ev-title', 'Caveats'));
-    const ul = el('ul', 'ev-list');
-    x.caveats.forEach(t => ul.append(el('li', null, t)));
-    b.append(ul); c.append(b);
-  }
-  if (x.row) { const cite = citationBlock(x.row); if (cite) c.append(cite); }
+  const rows = x.row ? [x.row].concat(x.dupes || []) : [];
+  const sig = signalsBlock(rows, x.layer);
+  if (sig) c.append(sig);
 
-  if (x.row) {
-    const r = x.row;
-    const det = el('details');
-    det.append(el('summary', null, 'Library details, sources and how to confirm'));
-    const g = el('div', 'detail-grid');
-    const row = (k, v) => { if (!v && v !== 0) return; const d = el('div');
-      d.append(el('span', 'dk', k), el('span', null, String(v))); g.append(d); };
-    row('Likely origin', r[F.origin]);
-    row('Ion composition', optCol(r, 'ionf'));
-    row('Also arises from', splitList(optCol(r, 'altn')).join(', '));
-    row('Also reported from', splitList(optCol(r, 'alto')).join('; '));
-    row('Also written as', splitList(optCol(r, 'alta')).join(', '));
-    row('Reported by', r[F.src] === 'memory+web' ? 'independent recall and published sources'
-        : r[F.src] === 'web' ? 'published sources' : 'domain knowledge');
-    row('Confidence', r[F.conf]);
-    row('Charge', r[F.charge]);
-    if (r[F.m2] != null) row('Predicted isotopes', 'M+1 ' + r[F.m1] + '% · M+2 ' + r[F.m2] + '%');
-    if (r[F.logp] != null) row('logP (XLogP)', r[F.logp] + ' — expect to elute ' + r[F.elution]);
-    if (r[F.rmd]) row('Relative mass defect', r[F.rmd] + ' ppm');
-    if (r[F.nnb]) row('Competing structures', r[F.nnb] + ' other known compounds within 5 ppm');
-    if (r[F.ms2n]) row('MS2 availability', r[F.ms2n] + ' public spectra');
-    row('Notes', r[F.note]);
-    det.append(g);
-    if (r[F.fam] && r[F.spacing]) {
-      const l = el('div', 'ladder');
-      l.append(el('strong', null, r[F.fam]));
-      l.append(document.createTextNode(' — members are ' + fmt(r[F.spacing]) + ' apart' +
-        (obs.charge > 1 ? ', i.e. ' + (r[F.spacing] / obs.charge).toFixed(4) + ' in m/z at ' + obs.charge + '+' : '') + '. '));
-      const jump = (mz, label) => {
-        if (!mz) return;
-        const b = el('button', 'ladder-link', label + ' ' + fmt(mz));
-        b.onclick = () => { $('q').value = fmt(mz) + (obs.polarity === 'neg' ? '-' : '+'); run();
-          window.scrollTo({ top: 0, behavior: 'smooth' }); };
-        l.append(b, document.createTextNode(' '));
-      };
-      jump(r[F.prev_mz], '← previous');
-      jump(r[F.next_mz], 'next →');
-      det.append(l);
-    }
-    c.append(det);
+  // warnings are never collapsed: a caveat the reader has to open a drawer to
+  // find is a caveat that did not happen
+  const cav = evBlock('Caveats', x.caveats, 'caveats');
+  if (cav) c.append(cav);
+
+  const key = x.layer + '|' + x.identity + '|' + (x.calc == null ? '' : x.calc.toFixed(4));
+  const supporting = (x.evidence || []).length + (x.checks || []).length;
+  if (supporting) {
+    // the companion card IS supporting material, so opening it by default is
+    // the honest default; everything else stays shut until asked for
+    const d = drawer(key + '|ev',
+      (x.layer === 'companion' ? 'What would settle this' : 'Why this matches') +
+      ' (' + supporting + ')', x.layer === 'companion');
+    const b1 = evBlock('Evidence', x.evidence);
+    if (b1) d.append(b1);
+    const b2 = evBlock('Look for these next', x.checks);
+    if (b2) d.append(b2);
+    c.append(d);
+  }
+  if (rows.length) {
+    const det = detailDrawer(rows, obs, key + '|det');
+    if (det) c.append(det);
   }
   return c;
 }
@@ -1451,13 +1826,20 @@ function showCards(hits, headline) {
   const box = $('cards'); box.textContent = '';
   $('status').textContent = headline;
   const limit = 60;
-  hits.slice(0, limit).forEach(h => box.append(libraryCard(h)));
+  // merge inside the rendered window only -- mergeRows is quadratic in the
+  // group count and a free-text search can return thousands of rows
+  const groups = mergeRows(hits.slice(0, limit + 40).map(h => h.r));
+  const folded = groups.slice(0, limit).reduce((s, g) => s + g.dupes.length, 0);
+  groups.slice(0, limit).forEach(g => box.append(libraryCard(g)));
+  if (folded) box.append(el('p', 'status', folded +
+    ' near-duplicate row' + (folded === 1 ? '' : 's') +
+    ' (the same ion under another spelling) folded into the cards above.'));
   if (hits.length > limit)
     box.append(el('p', 'status', 'Showing the top ' + limit + ' of ' + hits.length + ' matches.'));
 }
 
-function libraryCard(hit) {
-  const r = hit.r, c = el('div', 'card ' + r[F.pol]);
+function libraryCard(g) {
+  const r = g.row, dupes = g.dupes || [], c = el('div', 'card ' + r[F.pol]);
   const top = el('div', 'card-top');
   // A source that published a nominal integer mass must never be rendered to
   // four decimals: "45.0000" for formate reads as an exact mass but is 40 ppm
@@ -1474,11 +1856,14 @@ function libraryCard(hit) {
   if (r[F.cat]) chips.append(chip(prettyCat(r[F.cat])));
   if (r[F.charge] && String(r[F.charge]) !== '1') chips.append(chip('charge ' + r[F.charge], 'strong'));
   c.append(chips);
+  const rows = [r].concat(dupes);
+  const sig = signalsBlock(rows, 'library');
+  if (sig) c.append(sig);
   if (r[F.origin]) c.append(el('p', 'why', r[F.origin]));
-  const alt = altBlock(r);
-  if (alt) c.append(alt);
-  const cite = citationBlock(r);
-  if (cite) c.append(cite);
+  if (dupes.length) c.append(el('p', 'why', 'Also listed in the sources as ' +
+    [...new Set(dupes.map(d => d[F.name]))].join(', ') + ' — the same ion, one card.'));
+  const det = detailDrawer(rows, null, 'lib|' + r[F.name] + '|' + fmt(r[F.mz]));
+  if (det) c.append(det);
   return c;
 }
 
@@ -1532,14 +1917,28 @@ function explain(obs) {
   // composition as well as its neutral formula -- otherwise "sodium formate +
   // formate cluster, C2H2NaO4" is offered twice at 112.9856, once as a library
   // hit written [2M+Na-2H]- of CH2O2 and once as a generated composition.
-  const libFormulas = {};
+  const libFormulas = {}, libByIon = {};
   all.forEach(x => {
     if (x.layer !== 'library') return;
     if (x.formula) libFormulas[x.formula] = 1;
     const ionf = x.row ? optCol(x.row, 'ionf') : '';
-    if (ionf) libFormulas[ionf] = 1;
+    if (ionf) { libFormulas[ionf] = 1; if (!libByIon[ionf]) libByIon[ionf] = x; }
   });
   all = all.filter(x => !(x.layer === 'formula' && libFormulas[x.formula]));
+  // A computed cluster that lands on an ion the library already names is the
+  // same defect one layer up: [FA+HCOO+Na-H]- IS the sodium formate cluster the
+  // library row describes. Fold the mobile-phase reasoning onto the named card
+  // rather than printing the ion twice.
+  all = all.filter(x => {
+    if (x.layer !== 'cluster' || !x.ionf || !libByIon[x.ionf]) return true;
+    const host = libByIon[x.ionf];
+    host.evidence.push('the mobile phase you selected produces this exact ion directly: ' +
+      x.species + ' from ' + (x.ingredients && x.ingredients.length
+        ? x.ingredients.join(' + ') : 'the charge carrier alone') +
+      ' — same composition (' + x.ionf + '), so it is not listed again below');
+    (x.caveats || []).forEach(c => { if (host.caveats.indexOf(c) < 0) host.caveats.push(c); });
+    return false;
+  });
   all.sort((a, b) => a.score - b.score);
   const companion = layerCompanion(obs, iso);
   return { iso: iso, explanations: all, companion: companion };
@@ -1566,6 +1965,13 @@ function renderExplanations(obs, res) {
   if (obs.chargeConflict) notes.push('Warning: the B+1 spacing says z = ' + obs.chargeConflict.z +
     ', not the ' + obs.charge + ' you specified.');
   if (!obs.polarityGiven) notes.push('No polarity given, so positive was assumed — add + or - to be sure.');
+  if (obs.tol >= WIDE_WINDOW_DA) notes.push('This window is ± ' + obs.tol.toFixed(3) +
+    ' Da, so distances below are given in Daltons, not ppm: a ppm error would be measured against ' +
+    'a mass you did not supply. Typing more decimal places is what narrows this.');
+  notes.push('Source counts on the cards below are distinct published reports of that ion, with the ' +
+    'many re-encodings of one dataset collapsed to one. They measure attestation, not correctness: a ' +
+    'real industrial chemical accumulates several, while a computed cluster or a generated composition ' +
+    'has none by construction and says so.');
   res.iso.notes.forEach(n => notes.push(n.charAt(0).toUpperCase() + n.slice(1) + '.'));
   if (notes.length) {
     const ul = el('ul', 'ev-list');

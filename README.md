@@ -97,7 +97,7 @@ as an anonymous rung of a polymer ladder, deliberately have no page of their own
 they are catalogued on their series or class page instead, because publishing a
 labelled prediction as a standalone document would launder it into a fact.
 
-`data/contaminants.tsv` is the full compendium: **5,964 rows × 42 columns, one row
+`data/contaminants.tsv` is the full compendium: **5,964 rows × 45 columns, one row
 per ion**. Each row carries the neutral formula and the ion's own elemental
 composition; adduct, polarity and charge; the *m/z*, recomputed from formula and
 adduct for 4,810 of them and labelled in `mz_basis` for the rest; contaminant
@@ -106,6 +106,26 @@ layers of evidence: the homologous-series spacing to expect on either side of th
 peak (3,419 rows), how far the accurate mass alone can get you (`ms1_specificity_tier`,
 4,656 rows), and — for the 937 ions whose compound has public MS2 — how many spectra
 exist (`n_ms2_spectra`) and whether they may be redistributed (`ms2_licence_tier`).
+
+Three further columns say **how real an entry is**, which matters in a table that is
+half memory-derived. `pubchem_cid` (1,855 rows) is the compound's PubChem CID,
+resolved from its full InChIKey rather than from its name, so it is the same
+substance by construction; `inchikey_skeleton` (1,857 rows, 896 distinct structures)
+keys a 2D depiction in `struct/`; and `n_distinct_sources` counts the distinct
+*primary* documents behind the row. That last one collapses mirrors and
+re-encodings: most community contaminant tables — UWPR, commonMZ, MS Wil, EasyCont
+and the rest — are re-encodings of one dataset (Keller *et al.*, *Anal Chim Acta*
+2008), so they count once between them. Counting them separately would have made "is
+it in Keller?" look like independent corroboration, and it lowers 904 rows. Read the
+two together: a CID says the substance is real, `n_distinct_sources` says it is
+really *reported as a contaminant*, and a 0 there means only that no citable list
+here reports it — hydrochloric acid scores 0.
+
+`struct/<inchikey_skeleton>.svg` holds one 2D depiction per distinct structure, drawn
+only from a structure verified against that compound's own formula. Long saturated
+chains are drawn condensed (C*n*H*m*) so a C22 fatty amide does not render as a
+hairline zig-zag, the aspect ratio is fixed, and the strokes inherit the page colour
+so they work in light and dark.
 
 **A value we do not have is an empty field, never the string `NA`.** `NA` is truthy,
 so a placeholder makes `if row["neutral_formula"]:` pass for the 1,137 rows that have

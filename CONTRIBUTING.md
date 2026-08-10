@@ -54,7 +54,7 @@ Please do not skip them.
 
 Data contributions go in `parts/` (recalled or curated) or `web/` (extracted from
 a source), following the 18-column **part-file** contract in `data/SCHEMA.md` — which
-is a different, wider contract from the 42-column published table described lower in
+is a different, wider contract from the 45-column published table described lower in
 that file. Part files write `NA` for a value you do not have; the build turns that
 into an empty field, so never write `NA` into anything under `data/`. Corrections to existing
 rows go in `corrections.tsv` as an auditable overlay with a stated reason, rather

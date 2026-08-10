@@ -4,7 +4,7 @@ This file is the column contract for two different things, and they do not use t
 convention for a missing value:
 
 * the **part files** the compendium is built from -- 18 columns, `NA` for unknown;
-* the **published table** `data/contaminants.tsv` -- 42 columns, an **empty field** for unknown.
+* the **published table** `data/contaminants.tsv` -- 45 columns, an **empty field** for unknown.
 
 Part files are what a contributor writes; `contaminants.tsv` is what a reader cites. See
 [Published artefacts](#published-artefacts) for the published columns.
@@ -126,13 +126,13 @@ group; a category disagreement is surfaced as `merged_category_conflict:...` in 
 
 ## Published artefacts
 
-`data/contaminants.tsv` is the merged, m/z-resolved table: **42 columns, 5,964 rows, one row
+`data/contaminants.tsv` is the merged, m/z-resolved table: **45 columns, 5,964 rows, one row
 per unique ion**, tab-separated, UTF-8, no quoting and no escape character (no field contains a
 tab, newline or `"`). It is the merged master (`output/contaminants_master_<ts>.tsv` in the
-private pipeline -- its 18 part columns plus the computed mass, ladder and provenance columns)
-with the MS1 and MS2 evidence layers joined on as the last three columns by
-`build_site_data.py`, which writes this file and `contaminants.json` from **one** join so the
-two cannot disagree about the same ion.
+private pipeline -- its 18 part columns plus the computed mass, ladder, provenance and
+reference-count columns) with the MS1/MS2 evidence and compound-identity layers joined on as
+the last five columns by `build_site_data.py`, which writes this file and `contaminants.json`
+from **one** join so the two cannot disagree about the same ion.
 
 ### Missing values are EMPTY, never `NA`
 
@@ -196,9 +196,12 @@ sodium row and is never treated as a placeholder in any column.
 | 37 | `references` | ` \|\| `-separated citations, capped at 2000 characters on a separator boundary, never a local path |
 | 38 | `record_ids` | `;`-separated `record_id` of every merged source record |
 | 39 | `qc_flags` | `;`-separated build flags, see below |
-| 40 | `n_ms2_spectra` | how many public MS2 spectra this ion's compound has, see below |
-| 41 | `ms2_licence_tier` | whether those spectra may be redistributed, see below |
-| 42 | `ms1_specificity_tier` | how far the m/z alone goes towards an identification, see below |
+| 40 | `n_distinct_sources` | how many **distinct primary sources** stand behind the row, after mirrors and re-encodings of one dataset collapse to one, see below |
+| 41 | `n_ms2_spectra` | how many public MS2 spectra this ion's compound has, see below |
+| 42 | `ms2_licence_tier` | whether those spectra may be redistributed, see below |
+| 43 | `ms1_specificity_tier` | how far the m/z alone goes towards an identification, see below |
+| 44 | `pubchem_cid` | PubChem CID of the NEUTRAL compound, resolved by full InChIKey; empty where none, see below |
+| 45 | `inchikey_skeleton` | 14-character InChIKey skeleton of the compound; the key of its 2D depiction, see below |
 
 `qc_flags` vocabulary: `no_formula`, `no_adduct`, `no_mz`, `bad_adduct`,
 `adduct_loss_exceeds_molecule`, `mz_out_of_lc_ms_range`, `reported_is_nominal`,
@@ -207,6 +210,92 @@ sodium row and is never treated as a placeholder in any column.
 `reference_unresolved`, `merged_category_conflict:<other categories>`. Flags are the union
 over the merged records, so `no_formula` can appear on a row that does carry a formula: it
 means one of the records behind the row had none.
+
+### `n_distinct_sources` -- how many independent sources say this exists
+
+A count of the **distinct primary documents or datasets** behind the row. It answers "how real
+is this entry" in the only way the table can: a substance that genuinely turns up as an LC-MS
+contaminant is reported by several unrelated groups, and a formula somebody once guessed at is
+reported by none.
+
+It is **not** a count of the entries in `references`, for one reason recorded in this project's
+notes and re-verified against the 775 distinct reference strings in the current build:
+
+> most academic and community contaminant tables -- UWPR, commonMZ, MSbox, MS Wil, EasyCont,
+> the EPFL and UNM mirrors -- are **re-encodings of one dataset**: Keller BO, Sui J, Young AB,
+> Whittal RM, *Anal Chim Acta* 2008;627:71-81.
+
+Counted separately, every Keller compound would score 5-7 and the number would measure "is this
+in Keller?" rather than "is this real" -- worse than no number, because it looks quantitative.
+So mirrors and re-encodings collapse to one id. The same is done for the Waters *Background Ion
+Master List* (the vendor PDF, its Wayback recovery and the Pittsburgh mirror are one document),
+for MaConDa (site export and workbook copy), for HowDirty (two DOIs, one Skyline library), for
+the NORMAN Suspect List Exchange and for MassBank accessions. Distinct documents from one
+publisher do **not** collapse: two Thermo application notes on different subjects are two
+sources. **904 of 5,964 rows (15.2%) are scored lower by this collapsing**; the highest score
+falls from 7 to 5 on the published reference string.
+
+Three kinds of entry are not citations and count zero: `internal-knowledge` (this compendium's
+own memory-derived half -- a claim, not something a reader can resolve), the `(+N more)`
+truncation marker, and the local-only-source placeholder. The count is computed **before**
+`references` is truncated at 2,000 characters, so the 155 rows whose reference list overflows
+the cap are not penalised for being well attested.
+
+| `n_distinct_sources` | rows |
+|---|---|
+| 0 | 2,954 |
+| 1 | 2,444 |
+| 2 | 170 |
+| 3 | 283 |
+| 4 | 95 |
+| 5 or more | 18 |
+
+**Read it with `pubchem_cid`, not alone.** The two answer different questions and only together
+do what a reader wants:
+
+* `pubchem_cid` present -> the substance is a real, registered chemical entity.
+* `n_distinct_sources` high -> the substance is really **reported as an LC-MS contaminant**.
+
+A row can be 0 and still be a real chemical: hydrochloric acid, nitric acid and fluoride all
+score 0 because no published contaminant table in this compendium lists them -- they come from
+the memory-derived half. 576 compounds score 0 while carrying a verified structure and a
+PubChem CID. What a 0 means is precisely "no citable contaminant list here reports this", which
+is why the landing pages say that in words rather than printing a bare zero.
+
+A row whose adduct was **derived by rule** cannot inherit a score: every one of the 1,083 rows
+flagged `computed_adduct_only` carries `internal-knowledge` alone and therefore scores 0. This
+is asserted by a test in the pipeline (`test_refsources.py`) rather than assumed, so a future
+part file that gives a predicted adduct a citation fails the build instead of quietly
+publishing a prediction that looks observed.
+
+### `pubchem_cid` and `inchikey_skeleton` -- compound identity
+
+Both are properties of the **neutral compound**, not of the ion, so every adduct of one
+molecule carries the same pair.
+
+`inchikey_skeleton` is the 14-character skeleton (first block) of the compound's InChIKey. The
+skeleton and not the full key, because this project matches on skeletons throughout: spectral
+libraries disagree on the stereo layer, and one 2D depiction serves every stereoisomer and
+every adduct. It is populated only for compounds whose structure was **verified against the
+compound's own molecular formula** (resolution grades `verified` and `formula_confirmed`);
+a formula-only match would be worthless, since C15H24O is BHT and is equally every nonylphenol.
+**1,857 of 5,964 rows carry one, spanning 896 distinct structures.**
+
+`pubchem_cid` is resolved from the **full** InChIKey through PubChem PUG REST -- never from a
+name, which returns whatever the synonym index happens to hold. 925 of the 927 full InChIKeys
+were resolved (99.8%); the two misses are recorded as misses and are never replaced by a search
+URL, because a search URL is not an identifier. **1,855 of 5,964 rows carry a CID, spanning 899
+distinct compounds.** Build the link as
+`https://pubchem.ncbi.nlm.nih.gov/compound/<pubchem_cid>`.
+
+### `struct/` -- 2D depictions
+
+`struct/<inchikey_skeleton>.svg` in the published repo holds one depiction per distinct
+structure, drawn from the verified SMILES. They are theme-aware (strokes inherit the page's
+colour when the SVG is inlined; a `prefers-color-scheme` default applies when it is loaded
+standalone) and long saturated chains are drawn **condensed** as C<sub>n</sub>H<sub>m</sub>
+abbreviations, so a C22 fatty amide does not render as a hairline zig-zag. A depiction exists
+only where `inchikey_skeleton` is populated; there is no depiction inferred from a formula.
 
 ### The MS2 and MS1 evidence columns
 
@@ -249,7 +338,7 @@ identification, from the ion's mass defect and how crowded that mass is in known
 web app loads. Shape:
 
 ```
-{ "fields": [...36 short keys...], "rows": [[...], ...], "meta": {...} }
+{ "fields": [...39 short keys...], "rows": [[...], ...], "meta": {...} }
 ```
 
 Each row is an array positionally matching `fields`. Three fields carry provenance and search
@@ -273,6 +362,14 @@ from the same join, so the two files always agree:
 | `ms2n` | `n_ms2_spectra` | integer; **`0`** here where the TSV is empty -- both are falsy, but JSON rows are fixed-length arrays and a number costs less than a null |
 | `ms2tier` | `ms2_licence_tier` | same vocabulary |
 | `ms1tier` | `ms1_specificity_tier` | same vocabulary |
+
+Three more carry compound identity and the reference count, from that same join:
+
+| field | type | TSV column | meaning |
+|-------|------|-----------|---------|
+| `cid` | integer or `null` | `pubchem_cid` | PubChem CID of the neutral compound. `null` -- not `0`, not `""` -- where unresolved, because a missing identifier is not an identifier. Link as `https://pubchem.ncbi.nlm.nih.gov/compound/<cid>` |
+| `nref` | integer | `n_distinct_sources` | distinct primary sources after collapsing, `0` where none. Always present |
+| `ikey` | string | `inchikey_skeleton` | 14-character InChIKey skeleton, `""` where the compound has no verified structure. The depiction is `struct/<ikey>.svg` -- build that path only when `ikey` is non-empty |
 
 New fields are appended to the END of `fields`, and the app reads optional columns by name, so a
 browser holding an older cached bundle still loads.
