@@ -79,6 +79,62 @@ def main():
                          % (len(bad), bad[0]))
         print("  rows with wrong width: %d" % len(bad))
 
+    # ---- per-compound MS2 files ----
+    # These are fetched lazily by the app and inlined into the landing pages, so
+    # a malformed one is a broken panel rather than a broken site -- but the
+    # license gate below is not cosmetic. A peak list may only ship under a
+    # license that permits republication; anything else must be a link. This is
+    # the check that keeps that true in a fresh clone, independently of the
+    # pipeline that wrote the files.
+    MS2_SHIPPABLE = {"CC0", "CC BY", "dl-de/by-2-0"}
+    ms2dir = os.path.join(site, "ms2")
+    if os.path.isdir(ms2dir):
+        names = sorted(f for f in os.listdir(ms2dir) if f.endswith(".json"))
+        n_rec = n_peaks = n_ptr = 0
+        bad_license, bad_url, unparsed = [], [], []
+        manifest = {}
+        for fn in names:
+            try:
+                with open(os.path.join(ms2dir, fn), encoding="utf-8") as fh:
+                    doc = json.loads(fh.read(), parse_constant=boom)
+            except Exception as exc:                          # noqa: BLE001
+                unparsed.append("%s: %s" % (fn, exc))
+                continue
+            if fn == "index.json":
+                manifest = doc.get("files", {})
+                continue
+            for s in doc.get("spectra", []):
+                n_rec += 1
+                if s.get("peaks"):
+                    n_peaks += 1
+                    if s.get("license") not in MS2_SHIPPABLE:
+                        bad_license.append("%s/%s (%r)"
+                                           % (fn, s.get("acc"), s.get("license")))
+                else:
+                    n_ptr += 1
+                    # a pointer with no link is useless: it is the whole payload
+                    if not str(s.get("url", "")).startswith("http"):
+                        bad_url.append("%s/%s" % (fn, s.get("acc")))
+        print("ms2/: %d files, %d records (%d with peaks, %d pointer-only)"
+              % (len(names), n_rec, n_peaks, n_ptr))
+        if unparsed:
+            print("  unparsed: %d" % len(unparsed))
+            fails.append("ms2 files that are not valid JSON: %s" % "; ".join(unparsed[:5]))
+        if bad_license:
+            print("  PEAKS UNDER A LICENSE THAT DOES NOT PERMIT THEM: %d" % len(bad_license))
+            fails.append("ms2 peak lists shipped under a license that does not "
+                         "permit republication: %s" % ", ".join(bad_license[:5]))
+        if bad_url:
+            print("  pointer records with no resolvable URL: %d" % len(bad_url))
+            fails.append("ms2 pointer-only records with no URL: %s"
+                         % ", ".join(bad_url[:5]))
+        stale = sorted(set(manifest) - {n[:-5] for n in names})
+        if stale:
+            print("  manifest names %d files that do not exist" % len(stale))
+            fails.append("ms2/index.json lists missing files: %s" % ", ".join(stale[:5]))
+        if not (bad_license or bad_url or unparsed or stale):
+            print("  license gate + link check: OK")
+
     # ---- js ----
     js = open(os.path.join(site, "app.js"), encoding="utf-8").read()
     print("app.js: %d bytes" % len(js))

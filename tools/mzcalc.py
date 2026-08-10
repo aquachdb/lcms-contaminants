@@ -174,7 +174,7 @@ def parse_formula(formula):
         raise FormulaError("NA formula")
 
     # square brackets are also used as grouping with a multiplier, e.g. the
-    # cyclic siloxane "[C2H6SiO]5" -- normalise those to parentheses first so
+    # cyclic siloxane "[C2H6SiO]5" -- normalize those to parentheses first so
     # they are not mistaken for the bracketed-ion notation handled below
     f = re.sub(r"^\[([^\[\]]+)\](\d+)$", r"(\1)\2", f)
 
@@ -187,7 +187,7 @@ def parse_formula(formula):
     if not f:
         raise FormulaError("empty formula after charge stripping: %r" % formula)
 
-    # expand parenthesised groups
+    # expand parenthesized groups
     while "(" in f:
         m = re.search(r"\(([^()]*)\)(\d*)", f)
         if not m:
@@ -239,7 +239,7 @@ def monoisotopic_mass(formula, nominal=False):
 _ADDUCT_RE = re.compile(r"^\[\s*(\d*)\s*M\s*(\d*)\s*(.*?)\s*\](\d*)([+-])$")
 
 # one signed adduct term: an optional multiplier then a formula, where the
-# formula may itself contain parenthesised groups -- MaConDa writes double water
+# formula may itself contain parenthesized groups -- MaConDa writes double water
 # loss as "-(H2O)2"
 _ADDUCT_TERM_RE = re.compile(
     r"([+-])(\d*)((?:\([A-Za-z0-9]+\)\d*|[A-Za-z0-9]+)+)")
@@ -256,7 +256,7 @@ class AdductError(ValueError):
 
 
 def _adduct_terms(adduct):
-    """Tokenise adduct notation. The single grammar every reader shares.
+    """Tokenize adduct notation. The single grammar every reader shares.
 
     Returns (n_M, terms, charge, sign) with terms a list of
     (op, count, token, isotope) and isotope either None or an (element,
@@ -265,7 +265,7 @@ def _adduct_terms(adduct):
     if adduct is None:
         raise AdductError("empty adduct")
     a = str(adduct).strip().replace(" ", "")
-    # normalise unicode minus / middle dot
+    # normalize unicode minus / middle dot
     a = a.replace("−", "-").replace("·", "+")
     a = _OXIDATION_STATE_RE.sub("", a)
     m = _ADDUCT_RE.match(a)
@@ -496,7 +496,7 @@ def _term_label(token):
 
     A term written as a repeated unit is factored back to that unit so the
     spellings converge: '-H2' is two hydrogens, '-(H2O)2' is two waters, '+Na4'
-    is four sodiums. Factoring stops at a single element or at a recognised
+    is four sodiums. Factoring stops at a single element or at a recognized
     adduct term, so '+C4H8' is not mangled into '+4CH2'.
     """
     counts = parse_formula(ADDUCT_ALIASES.get(token, token))
@@ -550,7 +550,7 @@ def canonical_adduct(adduct):
         the charge carrier last ([M+CH3CN+Na]+), losses by DECREASING mass so
         water loss precedes deprotonation ([M-H2O-H]-);
       * repeated terms collapsed into a count (+TFA+TFA -> +2TFA), but never
-        cancelled across the + and - sides: [M-H2O-H]- keeps its chemistry and
+        canceled across the + and - sides: [M-H2O-H]- keeps its chemistry and
         does not silently become [M-H3O]-;
       * term formulas in Hill notation, except the standard condensed
         shorthands (CH3OH, CH3CN, HCOO, CH3COO, TFA, NH4 ...).
@@ -676,7 +676,7 @@ ISOTOPES = {
     "Co": [(58.9331950, 1.0)],
     # Ti/Al frits. Titanium is the most distinctive metal in the whole set:
     # intensity sits BOTH below (46Ti, 47Ti) and above (49Ti, 50Ti) its base
-    # peak. Aluminium, like cobalt, is monoisotopic and shows no satellite.
+    # peak. Aluminum, like cobalt, is monoisotopic and shows no satellite.
     "Ti": [(45.9526316, 0.0825), (46.9517631, 0.0744), (47.9479463, 0.7372),
            (48.9478700, 0.0541), (49.9447912, 0.0518)],
     "Al": [(26.98153863, 1.0)],

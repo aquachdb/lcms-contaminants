@@ -1,4 +1,4 @@
-/* Landing pages. Reuses every colour, radius and font of styles.css through the
+/* Landing pages. Reuses every color, radius and font of styles.css through the
    same custom properties -- there is one design system here, not two. Only the
    handful of components the app itself does not have are defined below. */
 .lp-brand { font-size: 1.15rem; font-weight: 600; margin: 0; }
@@ -57,6 +57,15 @@
 /* The one control a reader presses to verify the identification, so it gets a
    real 44px target rather than being an inline link inside a caption. */
 .lp-out { margin: 10px 0 0; }
+/* Fragment spectra. The fragment line is a long run of monospace numbers, so it
+   must be allowed to wrap anywhere -- an unbreakable run would push the page
+   into a horizontal scroll at 390px, which nothing else on these pages does. */
+.ms2-spec {
+  margin: 12px 0; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--surface-2);
+}
+.ms2-spec p { margin: 4px 0; }
+.ms2-frag { font-size: .86rem; line-height: 1.7; overflow-wrap: anywhere; }
 /* inline-flex, not line-height:44px -- the label wraps at 390px and a 44px line
    box would then render as two very tall lines with the text floating apart. */
 .lp-pubchem {

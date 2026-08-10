@@ -42,6 +42,40 @@ jobs:
           print(f"data bundle OK: {n} ions, {f} fields")
           PY
 
+      - name: Check the MS2 license gate
+        # Peak lists may only be republished under a license that permits it.
+        # This is the one check whose failure is a legal problem rather than a
+        # broken page, so it blocks the deploy rather than living only in the
+        # pipeline that generated the files.
+        run: |
+          python3 - <<'PY'
+          import json, os
+          SHIPPABLE = {"CC0", "CC BY", "dl-de/by-2-0"}
+          d = "ms2"
+          if not os.path.isdir(d):
+              print("no ms2/ directory; nothing to check")
+              raise SystemExit(0)
+          n_pk = n_ptr = 0
+          bad, nolink = [], []
+          for fn in sorted(os.listdir(d)):
+              if not fn.endswith(".json") or fn == "index.json":
+                  continue
+              doc = json.load(open(os.path.join(d, fn), encoding="utf-8"))
+              for s in doc["spectra"]:
+                  if s.get("peaks"):
+                      n_pk += 1
+                      if s.get("license") not in SHIPPABLE:
+                          bad.append((fn, s.get("acc"), s.get("license")))
+                  else:
+                      n_ptr += 1
+                      if not str(s.get("url", "")).startswith("http"):
+                          nolink.append((fn, s.get("acc")))
+          print(f"ms2: {n_pk} records with peaks, {n_ptr} pointer-only")
+          assert not bad, f"peaks shipped under a disallowed license: {bad[:5]}"
+          assert not nolink, f"pointer-only records with no URL: {nolink[:5]}"
+          print("MS2 license gate OK")
+          PY
+
       - name: Check the JavaScript actually parses
         # A release once shipped a blank page because of a single missing
         # parenthesis that no test ever executed.

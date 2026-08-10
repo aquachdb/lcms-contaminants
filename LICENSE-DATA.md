@@ -1,15 +1,15 @@
-# Data licence
+# Data license
 
 The **code** in this repository (`index.html`, `app.js`, `styles.css`, `tools/`)
 is MIT licensed — see [LICENSE](LICENSE).
 
 ## What is offered under CC BY 4.0, and what is not
 
-Please read this carefully rather than assuming a blanket licence, because a
+Please read this carefully rather than assuming a blanket license, because a
 blanket claim here would not be honest.
 
 **Offered under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/):** the
-*compilation* itself — the selection, structuring, normalisation and
+*compilation* itself — the selection, structuring, normalization and
 de-duplication of entries — together with the annotations computed for this
 project: recalculated exact masses, mass defects, predicted isotope envelopes,
 homologous-series assignments and spacings, MS1-specificity estimates, and the
@@ -19,15 +19,15 @@ curated corrections.
 work, and several sources impose their own terms. Individual entries derive from
 peer-reviewed papers under publisher copyright, instrument-vendor documentation
 carrying no redistribution grant, and community datasets under GPL and other
-licences. **Where an upstream source imposes terms, those terms govern that
-content**, and this licence cannot override them.
+licenses. **Where an upstream source imposes terms, those terms govern that
+content**, and this license cannot override them.
 
 Every row in `data/contaminants.tsv` records its own source in the `references`
 column. Consult it before reusing specific entries, and see
 [ATTRIBUTION.md](ATTRIBUTION.md) for the principal sources.
 
-We are explicit about this because this project criticises another widely used
-database for labelling an aggregate CC BY while it contained non-commercial and
+We are explicit about this because this project criticizes another widely used
+database for labeling an aggregate CC BY while it contained non-commercial and
 share-alike material. It would be poor form to repeat the mistake.
 
 If you represent a source and want an entry's attribution changed or removed,
@@ -41,7 +41,7 @@ please open an issue.
 
 ## Under one condition
 
-**Attribution.** Give appropriate credit, link to the licence, and indicate if
+**Attribution.** Give appropriate credit, link to the license, and indicate if
 changes were made.
 
 Suggested citation:
@@ -59,9 +59,17 @@ records its own source in its `references` field.** Where you rely on specific
 entries, please cite those sources as well — see [ATTRIBUTION.md](ATTRIBUTION.md)
 for the principal ones.
 
-**No source documents are redistributed here.** No publisher PDFs, no vendor
-manuals, no third-party spectral libraries — only derived facts, each carrying a
-citation back to its origin.
+**No source documents are redistributed here.** No publisher PDFs and no vendor
+manuals — only derived facts, each carrying a citation back to its origin.
+
+One exception is explicit and per-record: `ms2/<INCHIKEY_SKELETON>.json` reproduces
+MS2 peak lists, but **only** for records whose own license permits republication
+(`CC0`, `CC BY`, `dl-de/by-2-0`). Every record in those files carries its own
+license string and a link to the original. Share-alike, non-commercial and
+no-derivatives records are linked and never copied — share-alike included, because
+this compendium is CC BY 4.0 and cannot pass a share-alike obligation onward. An
+empty license field means *not established*, and such a record is never shipped
+with peaks.
 
 ## No warranty
 

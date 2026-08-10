@@ -191,7 +191,7 @@ check_eq("63Cu adduct is not merged with natural-abundance Cu",
          ic("C2H3N", "[M+63Cu]+") == ic("C2H3N", "[M+Cu]+"), False)
 check_eq("oxidation state is not iodine: [M+63Cu(I)]+ == [M+63Cu]+",
          ic("C2H3N", "[M+63Cu(I)]+") == ic("C2H3N", "[M+63Cu]+"), True)
-check_eq("parenthesised loss group: [M-(H2O)2]+ == [M-2H2O]+",
+check_eq("parenthesized loss group: [M-(H2O)2]+ == [M-2H2O]+",
          ic("C6H12O6", "[M-(H2O)2+H]+") == ic("C6H12O6", "[M-2H2O+H]+"), True)
 
 # ---- THE NEGATIVE CONTROL -------------------------------------------------
@@ -239,7 +239,7 @@ CANON = [
     ("[M+1H]1+", "[M+H]+"),              # redundant 1s dropped
     ("[M+2H]2+", "[M+2H]2+"),            # real charge kept
     ("[M+Na+CH3CN]+", "[M+CH3CN+Na]+"),  # charge carrier written last
-    ("[M+ACN+Na]+", "[M+CH3CN+Na]+"),    # shorthand normalised
+    ("[M+ACN+Na]+", "[M+CH3CN+Na]+"),    # shorthand normalized
     ("[M+H+C3H7NO]+", "[M+DMF+H]+"),
     ("[M+H+CH2O2]+", "[M+HCOOH+H]+"),
     ("[M-H2O-H]-", "[M-H2O-H]-"),        # heaviest loss first

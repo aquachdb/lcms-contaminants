@@ -92,12 +92,12 @@ body:
     id: notes
     attributes:
       label: Anything else
-      description: "Retention behaviour, isotope pattern, MS2 fragments, when it appears, how to get rid of it."
+      description: "Retention behavior, isotope pattern, MS2 fragments, when it appears, how to get rid of it."
 
   - type: checkboxes
     id: terms
     attributes:
-      label: Licence
+      label: License
       options:
         - label: "I agree this report may be published under CC BY 4.0 with attribution to me."
           required: true

@@ -20,7 +20,7 @@
   "description": "A curated, exact-mass-validated list of liquid chromatography-mass spectrometry contaminant and background ions, aggregated from peer-reviewed contaminant tables, instrument-vendor background ion lists, core-facility tables, spectral databases and code repositories.",
   "keywords": ["LC-MS", "mass spectrometry", "contaminant", "background ion", "m/z", "plasticizer", "siloxane", "polyethylene glycol", "leachable", "metabolomics", "proteomics", "blank"],
   "license": "https://creativecommons.org/licenses/by/4.0/",
-  "measurementTechnique": "Liquid chromatography-electrospray ionisation mass spectrometry"
+  "measurementTechnique": "Liquid chromatography-electrospray ionization mass spectrometry"
 }
 </script>
 </head>
@@ -62,23 +62,40 @@
         charge the way you already write it: <code>371+</code>, <code>371-</code>, <code>371 2+</code>,
         <code>371(3+)</code>, <code>371 z=5</code>, <code>371++</code> or <code>[M+H]+ 371.1012</code>.
         You can also search a name, formula or class.</p>
+      <div class="try-row"><span class="try-label">Try:</span>
+        <span class="examples" id="findExamples"></span></div>
 
       <details class="drawer" id="isoBlock">
         <summary>Isotope peaks and context <span id="isoBadge" class="badge" hidden></span></summary>
         <div class="filter-grid">
           <div class="field">
-            <label>Peaks above your base peak</label>
+            <label id="isoGridLabel">The isotope cluster — m/z and intensity</label>
             <div class="iso-row">
-              <span class="iso-tag">B+1</span>
-              <input id="b1mz" type="number" step="0.0001" placeholder="m/z" aria-label="B plus 1 m/z">
-              <input id="b1pct" type="number" step="0.1" min="0" placeholder="% of B0" aria-label="B plus 1 percent of base peak">
+              <span class="iso-tag">B0</span>
+              <input id="b0mz" type="number" step="0.0001" readonly aria-readonly="true"
+                     placeholder="from above" aria-label="B0 m/z, mirrored from the search box"
+                     title="The base peak you typed in the search box. Edit it there — this field mirrors it.">
+              <input id="b0int" type="text" inputmode="decimal" autocomplete="off" value="100"
+                     placeholder="intensity" aria-label="B0 intensity">
             </div>
             <div class="iso-row">
-              <span class="iso-tag">B+2</span>
-              <input id="b2mz" type="number" step="0.0001" placeholder="m/z" aria-label="B plus 2 m/z">
-              <input id="b2pct" type="number" step="0.1" min="0" placeholder="% of B0" aria-label="B plus 2 percent of base peak">
+              <span class="iso-tag">B1</span>
+              <input id="b1mz" type="number" step="0.0001" placeholder="m/z" aria-label="B1 m/z">
+              <input id="b1int" type="text" inputmode="decimal" autocomplete="off"
+                     placeholder="intensity" aria-label="B1 intensity">
             </div>
-            <p class="micro"><strong>The B+1 m/z is the charge determinant</strong> — z = round(1.0034 ÷ (B+1 − B0)),
+            <div class="iso-row">
+              <span class="iso-tag">B2</span>
+              <input id="b2mz" type="number" step="0.0001" placeholder="m/z" aria-label="B2 m/z">
+              <input id="b2int" type="text" inputmode="decimal" autocomplete="off"
+                     placeholder="intensity" aria-label="B2 intensity">
+            </div>
+            <p class="micro" id="isoErr" hidden></p>
+            <p class="micro"><strong>Intensities, not percentages.</strong> Type what your peak list actually
+              says — <code>1.43e6</code>, <code>124000</code> or <code>1,240,000</code>. B0 starts at
+              <code>100</code>, so entering percentages still works exactly as before; replace it with the real
+              base-peak height and the ratios are computed for you. B0's m/z is the number in the search box.</p>
+            <p class="micro"><strong>The B1 m/z is the charge determinant</strong> — z = round(1.0034 ÷ (B1 − B0)),
               which works for every charge state, not just 2+. Its <em>exact</em> mass also names the element:
               ¹³C, ²⁹Si, ³³S, ⁵³Cr and ⁵⁷Fe all sit at different offsets near +1.</p>
           </div>
@@ -87,11 +104,9 @@
             <label class="check"><input type="checkbox" id="belowB0"> Is there a peak below your tallest one?</label>
             <p class="micro">⁵⁴Fe, ⁵⁰Cr, ¹⁰B and ⁶Li all put intensity <em>below</em> the base peak, and titanium puts it
               on both sides. Metals are only called on the satellite <strong>pair</strong>, never on one peak alone.</p>
-            <label for="rtMin">Retention time (min, optional)</label>
-            <input id="rtMin" type="number" step="0.01" min="0" placeholder="e.g. 1.42">
           </div>
           <div class="field">
-            <label>Mobile phase flowing at that time</label>
+            <label>Mobile phase flowing when the peak eluted</label>
             <div id="solvents" class="solvent-grid">
               <label class="check"><input type="checkbox" data-solvent="water" checked> water</label>
               <label class="check"><input type="checkbox" data-solvent="acn" checked> acetonitrile</label>
@@ -104,7 +119,7 @@
               <label class="check"><input type="checkbox" data-solvent="tfa"> TFA</label>
             </div>
             <p class="micro">Cluster explanations are <em>computed</em> from exactly what you tick here — a list cannot
-              enumerate this space. Untick anything that was not flowing at your retention time.</p>
+              enumerate this space. Untick anything that was not flowing when your peak eluted.</p>
           </div>
         </div>
       </details>
@@ -202,7 +217,7 @@
             <p class="micro">M+1 ≈ 1.1% per carbon, so it estimates carbon count.</p>
           </div>
           <div class="field">
-            <label for="elution">Retention behaviour</label>
+            <label for="elution">Retention behavior</label>
             <select id="elution">
               <option value="">Any</option>
               <option value="very early">Very early (logP &lt; 0)</option>
@@ -229,9 +244,11 @@
         <button id="downloadList" class="ghost-btn" type="button" hidden>Download CSV</button>
         <span class="privacy">🔒 Runs in your browser — nothing is uploaded.</span>
       </div>
+      <div class="try-row"><span class="try-label">Try:</span>
+        <span class="examples" id="listExamples"></span></div>
       <p class="hint">Peaks belonging to the same homologous series are grouped together, so a blank full of PEG
         collapses into one line instead of forty. Series are tested at <strong>spacing ÷ z for z = 1–4</strong>, so a
-        3+ PEG envelope stepping by 14.675 is still recognised as PEG.</p>
+        3+ PEG envelope stepping by 14.675 is still recognized as PEG.</p>
     </div>
 
     <!-- ============ 3. delta explainer ============ -->
@@ -243,6 +260,8 @@
         <input id="dDelta" type="number" step="0.0001" placeholder="the difference" aria-label="Mass difference">
         <button id="runDelta" class="primary-btn" type="button">Explain</button>
       </div>
+      <div class="try-row"><span class="try-label">Try:</span>
+        <span class="examples" id="deltaExamples"></span></div>
       <p class="hint">What does the gap between two peaks mean? This checks adduct differences, polymer repeat units,
         isotope spacings and common neutral losses at once.</p>
     </div>
@@ -283,7 +302,7 @@
        tables, spectral databases and public code repositories.
        <strong>4,810 of 5,934 ions (81%)</strong> have their m/z recomputed here from a molecular formula and
        adduct; 1,001 carry the value their source published, and 123 only a nominal integer mass. The last two
-       are labelled on every result, and the nominal ones are shown as <code>~45</code> rather than as an exact
+       are labeled on every result, and the nominal ones are shown as <code>~45</code> rather than as an exact
        mass. 58% of entries rest on domain knowledge cross-checked against this literature rather than on
        a single citable table, and <strong>1,083 (18%) are computed adduct forms</strong> &mdash; formate, acetate,
        chloride and deprotonated ions derived by rule from a contaminant with a verified structure, not ions
@@ -293,7 +312,7 @@
        <a href="https://github.com/aquachdb/lcms-contaminants">Source, full dataset and issue tracker on GitHub</a> ·
        <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/data/contaminants.tsv">Download the data (TSV)</a> ·
        <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/ATTRIBUTION.md">Attribution</a> ·
-       <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/LICENSE-DATA.md">Licence</a> ·
+       <a href="https://github.com/aquachdb/lcms-contaminants/blob/main/LICENSE-DATA.md">License</a> ·
        <a href="https://github.com/aquachdb/lcms-contaminants/issues/new?template=contaminant-source.yml">Report a contaminant source</a>
     </p>
     <p class="micro">Compilation and computed annotations CC BY 4.0; upstream sources keep their own terms, and

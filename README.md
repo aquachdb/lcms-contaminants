@@ -18,7 +18,7 @@ rest says so.** 4,810 of 5,964 ions carry a molecular formula and adduct, and
 their m/z is recalculated from those with the electron mass applied; independent
 audit found the maximum disagreement between stored and recomputed values to be
 5×10⁻⁵ Da, with none beyond 0.0001 Da. Of the remainder, 1,124 carry the value
-their source published, 123 of them only a nominal integer mass; both are labelled on
+their source published, 123 of them only a nominal integer mass; both are labeled on
 every result, and nominal ones display as `~45` rather than as a false exact
 mass. Recomputation caught real errors in published tables — including widely
 quoted values that omit the electron mass, and a database whose DEHP entry is
@@ -34,7 +34,7 @@ compendium's largest hole: before this the entire table held 28 `[M+HCOO]-`, 17
 appear under a formic-acid or ammonium-acetate mobile phase. Eligibility is
 decided by SMARTS substructure rules against a verified structure, not by
 formula, and permanent cations, siloxanes and simple esters are deliberately
-given nothing. Every computed row is labelled as predicted on its card.
+given nothing. Every computed row is labeled as predicted on its card.
 
 Treat this as a curated screening resource, not a validated reference standard.
 
@@ -94,18 +94,18 @@ Every ion that is a discrete, observed compound also has its own page — 1,954 
 them, plus 167 homologous-series pages and 25 contaminant-class pages. Start at
 [browse.html](browse.html). Ions that exist only as a predicted adduct, or only
 as an anonymous rung of a polymer ladder, deliberately have no page of their own:
-they are catalogued on their series or class page instead, because publishing a
-labelled prediction as a standalone document would launder it into a fact.
+they are cataloged on their series or class page instead, because publishing a
+labeled prediction as a standalone document would launder it into a fact.
 
-`data/contaminants.tsv` is the full compendium: **5,964 rows × 45 columns, one row
+`data/contaminants.tsv` is the full compendium: **5,964 rows × 47 columns, one row
 per ion**. Each row carries the neutral formula and the ion's own elemental
 composition; adduct, polarity and charge; the *m/z*, recomputed from formula and
-adduct for 4,810 of them and labelled in `mz_basis` for the rest; contaminant
+adduct for 4,810 of them and labeled in `mz_basis` for the rest; contaminant
 class; where it comes from, and its own reference — every row has one. Then three
 layers of evidence: the homologous-series spacing to expect on either side of the
 peak (3,419 rows), how far the accurate mass alone can get you (`ms1_specificity_tier`,
 4,656 rows), and — for the 937 ions whose compound has public MS2 — how many spectra
-exist (`n_ms2_spectra`) and whether they may be redistributed (`ms2_licence_tier`).
+exist (`n_ms2_spectra`) and whether they may be redistributed (`ms2_license_tier`).
 
 Three further columns say **how real an entry is**, which matters in a table that is
 half memory-derived. `pubchem_cid` (1,855 rows) is the compound's PubChem CID,
@@ -124,8 +124,22 @@ here reports it — hydrochloric acid scores 0.
 `struct/<inchikey_skeleton>.svg` holds one 2D depiction per distinct structure, drawn
 only from a structure verified against that compound's own formula. Long saturated
 chains are drawn condensed (C*n*H*m*) so a C22 fatty amide does not render as a
-hairline zig-zag, the aspect ratio is fixed, and the strokes inherit the page colour
+hairline zig-zag, the aspect ratio is fixed, and the strokes inherit the page color
 so they work in light and dark.
+
+`ms2/<inchikey_skeleton>.json` holds the **fragment spectra themselves**, one small file
+per compound, fetched lazily so the main bundle stays the same size. Each entry carries a
+precursor *m/z*, adduct, polarity, collision energy and instrument where the source states
+them, plus an accession, a resolvable link to the original record, and **that record's own
+license**. Peaks are reproduced only where the license permits republication (`CC0`,
+`CC BY`, `dl-de/by-2-0`); share-alike, non-commercial and no-derivatives records are
+linked and never copied. `ms2/index.json` says which files exist. `n_ms2_records` and
+`n_ms2_peaklists` in the table count them.
+
+This is deliberately different from `n_ms2_spectra`, which counts spectra in an aggregated
+library. That aggregate publishes no per-record license and no upstream accession, so a
+spectrum inside it can be neither licensed nor cited — it tells you how much exists, not
+how to get it. The `ms2/` files go to the primary libraries instead, one record at a time.
 
 **A value we do not have is an empty field, never the string `NA`.** `NA` is truthy,
 so a placeholder makes `if row["neutral_formula"]:` pass for the 1,137 rows that have
@@ -192,7 +206,7 @@ already sat several commits behind the real one — publishing SDS cluster masse
 222 Da too light, while the equally stale test suite shipped next to it reported
 "0 checks failed".
 
-## Licence
+## License
 
 Data CC BY 4.0, code MIT. See LICENSE. If you use this, please cite it — see
 CITATION.cff.

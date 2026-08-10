@@ -195,8 +195,13 @@ textarea:focus { outline: none; border-color: var(--accent); }
 }
 .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
 .empty h3 { color: var(--text); margin: 0 0 8px; }
-.examples { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
-.examples button { font-family: var(--mono); }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* One "Try:" affordance, in the same place on all three tabs: directly under
+   that tab's input. */
+.try-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.try-label { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.try-chip { font-family: var(--mono); font-size: .84rem; padding: 7px 12px; }
 
 table.peaks { width: 100%; border-collapse: collapse; font-size: .87rem; margin-top: 10px; }
 table.peaks th, table.peaks td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); }
@@ -243,16 +248,118 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
   text-underline-offset: 2px; display: inline-flex; align-items: center;
   min-height: 24px; word-break: break-word;
 }
+/* The structure plate is LIGHT IN BOTH THEMES, and the strokes stay dark.
+   Inverting the drawing on the dark theme (what this used to do) turns a
+   structure into a photographic negative; chemists read structures as ink on
+   paper, so the paper stays white. The border, the radius and the internal
+   padding are what make a light rectangle on a dark page read as a deliberate
+   drawing surface instead of as a failed render. */
+:root { --plate: #ffffff; --plate-edge: #c8d0da; }
+@media (prefers-color-scheme: dark) { :root { --plate: #f4f6f8; --plate-edge: #46525f; } }
+:root[data-theme="dark"] { --plate: #f4f6f8; --plate-edge: #46525f; }
+:root[data-theme="light"] { --plate: #ffffff; --plate-edge: #c8d0da; }
+
 .struct-wrap {
   flex: 0 0 auto; width: 72px; height: 72px; aspect-ratio: 1 / 1;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
-  overflow: hidden;
+  border: 1px solid var(--plate-edge); border-radius: 8px; background: var(--plate);
+  overflow: hidden; padding: 4px; cursor: zoom-in; display: block;
 }
+.struct-wrap:hover { border-color: var(--accent); }
+.struct-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The SVGs are not passive bitmaps: each one carries
+     @media (prefers-color-scheme: dark) { color: #dfe6ee }
+   and an <img>-embedded SVG resolves that against the USED color scheme it
+   inherits from this document. So the moment :root switches to
+   `color-scheme: dark`, the drawing repaints its ink light -- and on a light
+   plate that is a nearly blank rectangle, which is the exact complaint this
+   change is fixing.
+
+   Pinning `color-scheme: light` on the image tells the embedded document the
+   truth about the surface it is drawn on. That is why this is not done with a
+   filter: an invert would also flip the heteroatom colors, which are fixed hex
+   values (#217F59 for the bond accents) and are already correct. */
+.struct-thumb, .struct-big { color-scheme: light; }
 .struct-thumb { display: block; width: 100%; height: 100%; object-fit: contain; }
-/* the SVGs are black-on-transparent line drawings, invisible on the dark theme */
-@media (prefers-color-scheme: dark) { .struct-thumb { filter: invert(1) hue-rotate(180deg); } }
-:root[data-theme="dark"] .struct-thumb { filter: invert(1) hue-rotate(180deg); }
-:root[data-theme="light"] .struct-thumb { filter: none; }
+
+/* ---------- enlarged structure dialog ---------- */
+html.struct-open, html.struct-open body { overflow: hidden; }
+.struct-overlay {
+  position: fixed; inset: 0; z-index: 50; display: flex;
+  align-items: center; justify-content: center; padding: 20px;
+  background: rgba(8, 14, 20, .72); overflow: auto; overscroll-behavior: contain;
+}
+.struct-overlay[hidden] { display: none; }
+.struct-panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px; width: min(560px, 100%);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.struct-caption { font-size: .95rem; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.struct-plate {
+  background: var(--plate); border: 1px solid var(--plate-edge); border-radius: 8px;
+  padding: 14px; display: flex; align-items: center; justify-content: center;
+}
+/* the files are 320x240, so 4/3 keeps the drawing undistorted at any width */
+.struct-big { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; object-fit: contain; }
+.struct-close { align-self: flex-end; min-height: 44px; }
+/* the dialog now hosts either a structure plate or a fragment spectrum; the
+   min-width:0 is what lets a peak table scroll inside it rather than widen it */
+.overlay-body { min-width: 0; }
+
+/* ---------- MS2 fragment spectra ----------
+   The plot's box is sized by aspect-ratio BEFORE the file is fetched, for the
+   same reason the structure thumbnail's is: a slow ms2/<IKEY>.json must not
+   reflow the card under the reader's thumb. */
+.ms2-drawer > summary { color: var(--accent); }
+.ms2-slot { margin-top: 8px; }
+.ms2-lead { margin-top: 0; }
+.ms2-recs { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.ms2-rec {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: 9px 11px; background: var(--surface-2);
+  min-width: 0;
+}
+/* a pointer-only record is a result, not a failure -- it is marked as a
+   different KIND of record, never as a degraded one */
+.ms2-rec-ptr { border-left-color: var(--muted); }
+.ms2-cond { margin-top: 0; color: var(--text); overflow-wrap: anywhere; }
+.ms2-frag { margin: 6px 0 0; overflow-wrap: anywhere; }
+.ms2-cite { overflow-wrap: anywhere; }
+.ms2-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.ms2-lic { color: var(--good); }
+/* an unstated license is not a permissive one, and must not look like one */
+.ms2-lic-none { color: var(--warn); }
+.ms2-ptr-why { color: var(--text); }
+.ms2-open-btn {
+  display: inline-flex; align-items: center; min-height: 44px; margin-top: 6px;
+  padding: 0 13px; border: 1px solid var(--accent); border-radius: 8px;
+  color: var(--accent); text-decoration: none; font-size: .84rem; font-weight: 600;
+}
+.ms2-open-btn:hover { background: var(--accent-soft); }
+/* capped, not full-bleed: the box is sized by aspect ratio, so on a 950px card
+   an uncapped plot would be 325px tall and six of them would bury the rest of
+   the answer. 520px is about as wide as a fragment axis needs to be readable. */
+.ms2-plot-wrap {
+  display: block; width: 100%; max-width: 520px; margin-top: 8px; padding: 4px;
+  cursor: zoom-in;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.ms2-plot-wrap:hover { border-color: var(--accent); }
+.ms2-plot-wrap:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ms2-plot { display: block; width: 100%; height: auto; aspect-ratio: 320 / 110; }
+.ms2-plot-big { aspect-ratio: 320 / 110; }
+.ms2-axis { stroke: var(--border); stroke-width: 1; }
+.ms2-bar { stroke: var(--accent); stroke-width: 1.4; stroke-linecap: round; }
+.ms2-lab { fill: var(--muted); font-family: var(--mono); font-size: 7px; }
+.ms2-ax-lab { fill: var(--muted); font-family: var(--mono); font-size: 7px; }
+.ms2-big { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ms2-scroll { max-height: 40vh; overflow-y: auto; }
+.ms2-more { margin-top: 10px; }
+.ms2-census { border-top: 1px dashed var(--border); padding-top: 7px; }
+/* the established zero is a statement, not an empty state, so it is given the
+   same weight as an answer -- and never rendered as the number 0 */
+.ms2-zero { margin-top: 11px; border-left: 3px solid var(--muted); padding-left: 10px; }
+.ms2-zero-head { font-size: .85rem; font-weight: 600; color: var(--muted); }
 
 .delta-inputs { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
 .delta-inputs input {
@@ -303,7 +410,11 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
   .card-name { font-size: .95rem; min-width: 100%; }
   .about p, .site-footer p { font-size: .88rem; }
   .iso-row { flex-wrap: wrap; }
-  .iso-row input { min-width: 44%; }
+  /* the intensity boxes are type=text, so the .field input[type=number] rule
+     above does not reach them; 16px is also what stops iOS zooming on focus */
+  .iso-row input { min-width: 44%; min-height: 44px; font-size: 16px; }
+  .iso-tag { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .struct-panel { padding: 13px; }
 
   /* the per-result disclosure and the ladder jump links are the two controls a
      user taps most on a phone, and both were ~21px tall */
@@ -317,6 +428,11 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
     display: inline-block; min-height: 44px; line-height: 44px;
     padding: 0 4px; margin-right: 4px;
   }
+  /* MS2: every control the drawer opens is a thumb target too. The plot is
+     ~110px tall at this width, so only the links need the floor. */
+  .ms2-link { display: inline-block; padding: 11px 0; }
+  .ms2-open-btn { width: 100%; justify-content: center; }
+  .ms2-rec { padding: 9px 10px; }
 }
 
 @media (max-width: 560px) {
@@ -338,6 +454,11 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
   background: var(--surface-2); color: var(--text);
 }
 .iso-row input:focus { outline: none; border-color: var(--accent); }
+/* B0's m/z is a mirror of the search box, not a second place to type it. The
+   dashed edge says "derived" without hiding the value. */
+.iso-row input[readonly] { border-style: dashed; color: var(--muted); cursor: default; }
+.iso-row input[aria-invalid="true"] { border-color: var(--warn); }
+#isoErr { color: var(--warn); font-weight: 600; }
 .solvent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 2px 10px; }
 
 .summary-card { border-left: 3px solid var(--accent); }
@@ -357,6 +478,10 @@ table.peaks td.num, table.peaks th.num { font-family: var(--mono); }
 }
 .ev-list { margin: 0; padding-left: 18px; font-size: .88rem; line-height: 1.5; }
 .ev-list li { margin-bottom: 4px; }
+/* Every reference is rendered, however many there are; a long list scrolls
+   inside the drawer rather than being truncated. Short lists never reach the
+   cap, so nothing scrolls in the common case. */
+.ref-list { max-height: 60vh; overflow-y: auto; overscroll-behavior: contain; }
 .ev-block.caveats .ev-title { color: var(--warn); }
 .ev-block.caveats .ev-list { color: var(--warn); }
 

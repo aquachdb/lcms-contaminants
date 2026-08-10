@@ -1,11 +1,11 @@
 {
  "generated_by": "scripts/build_pages.py",
- "lastmod": "2026-08-09",
+ "lastmod": "2026-08-10",
  "counts": {
-  "ion": 1954,
-  "series": 167,
+  "ion": 1968,
+  "series": 163,
   "class": 25,
-  "total_files": 2148
+  "total_files": 2158
  },
  "owned_dirs": [
   "ion",

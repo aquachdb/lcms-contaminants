@@ -64,13 +64,13 @@ than editing the source part files — that way every change stays reviewable.
 
 - **Copyrighted source documents.** Publisher PDFs and vendor manuals cannot be
   redistributed here. Cite them; derive facts from them; do not commit them.
-- **Spectra under non-commercial or share-alike licences**, unless clearly
-  segregated and labelled. This is not hypothetical: a widely used aggregate
-  library is labelled CC BY while containing a measurable fraction of
-  non-commercial material, which is why the table's `ms2_licence_tier` column
+- **Spectra under non-commercial or share-alike licenses**, unless clearly
+  segregated and labeled. This is not hypothetical: a widely used aggregate
+  library is labeled CC BY while containing a measurable fraction of
+  non-commercial material, which is why the table's `ms2_license_tier` column
   (see `data/SCHEMA.md`) records reuse terms per ion rather than assuming them.
 
-## Licence
+## License
 
 Data and community reports: CC BY 4.0. Code: MIT. By contributing you agree your
 contribution may be published under those terms with attribution to you.

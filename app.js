@@ -1,6 +1,11 @@
 /* LC-MS ion explainer — everything (library lookup, cluster generation, formula
    generation, isotope interpretation) runs client-side, so a user's peak list
-   never leaves their machine. No dependencies, no network calls after load.
+   never leaves their machine: the query, the peak list and every calculation
+   stay in the page. No dependencies and no third-party requests. The only
+   requests made after load are same-origin GETs for files this site itself
+   ships -- a structure drawing (struct/<IKEY>.svg) and a compound's fragment
+   records (ms2/<IKEY>.json) -- each fetched once and only when the reader opens
+   it, which does put that compound's key in this host's access log.
 
    The identification model is the one specified in IDENTIFY_SPEC.md; the Python
    reference is scripts/identify.py and the two must agree. */
@@ -90,7 +95,7 @@ const METAL_PAIRS = {
   Fe: 'A+1 2.3% with 6.4% two below',
   Ti: 'intensity on both sides — 10.1% and 11.2% below, 7.3% and 7.0% above',
   Co: 'monoisotopic — a cobalt species shows no satellite at all',
-  Al: 'monoisotopic — an aluminium species shows no satellite at all'
+  Al: 'monoisotopic — an aluminum species shows no satellite at all'
 };
 const C13 = 1.0033548;
 
@@ -103,9 +108,43 @@ const HALIDE = ['Cl', 'F', 'Br', 'I'];
 const EXOTIC_ORDER = ['Cl', 'K', 'S', 'P', 'Si', 'Na', 'F', 'Br', 'Cr', 'Fe',
   'Ti', 'Cu', 'Zn', 'B', 'Li', 'I'];
 const BASE_ELEMENTS = ['C', 'H', 'N', 'O', 'S', 'P', 'Na', 'K', 'Cl', 'F', 'Si'];
-const CAPS = { C: 80, H: 160, N: 6, O: 20, S: 4, P: 4, Na: 2, K: 2, Cl: 6, F: 9,
-  Br: 3, I: 2, Si: 4, Fe: 1, Cu: 1, Zn: 1, Cr: 2, Ti: 1, B: 2, Li: 2 };
-const HETERO_PENALTY = { N: 0.35, S: 0.80, P: 1.00, Cl: 1.00, F: 1.40, Na: 1.20,
+
+/* GENERATION caps — a search-tractability device, nothing more.
+   They bound the combinatorial enumeration in generateFormulas() and they are
+   disclosed to the user on the wide-window card ("inside this app's element
+   caps; the unrestricted number is larger still"). They are NOT a statement
+   about chemistry, and they must never be used to rule an element out of an
+   observed spectrum: see ISOTOPE_ATOM_MARGIN below for the bound that is.
+   Silicon is the one raised on purpose. The cyclic siloxanes that dominate
+   every ESI background carry 5 (D5), 6 (D6) and more silicons, and PDMS and
+   dimethicone oligomers in this library reach 14, so a cap of 4 put the most
+   common background ions in the whole dataset out of the generator's reach. */
+const GEN_CAPS = { C: 80, H: 160, N: 6, O: 20, S: 4, P: 4, Na: 2, K: 2, Cl: 6, F: 9,
+  Br: 3, I: 2, Si: 14, Fe: 1, Cu: 1, Zn: 1, Cr: 2, Ti: 1, B: 2, Li: 2 };
+
+/* ISOTOPE-side bound — a different question with a different answer.
+   Reading an A+1 or A+2 satellite asks "can this ion contain n atoms of X?",
+   and the only defensible limit is the physical one carried by the m/z the user
+   typed: n atoms of X weigh n * m_X and cannot outweigh the ion. Anything under
+   that stays on the table; where no bound can be established the app reports the
+   ambiguity instead of asserting a wrong negative.
+   The margin covers adduct and charge bookkeeping (the ion mass is taken as
+   m/z * z, which ignores the electron mass and any neutral-loss framing). */
+const ISOTOPE_ATOM_MARGIN = 1.02;
+/* Atoms are quantized. An intensity that cannot reach a single atom of X, even
+   read at the top of its own uncertainty, is not evidence of X — this is the
+   rule that used to be applied to metals alone. */
+const MIN_ATOMS = 0.6;
+
+/* The most atoms of `el` an ion of mass `ionMass` could physically hold.
+   An element with no tabulated mass gets no bound rather than a rejection. */
+function maxAtomsInIon(el, ionMass) {
+  const m = EL[el];
+  if (!m || !(ionMass > 0)) return Infinity;
+  return Math.floor(ionMass * ISOTOPE_ATOM_MARGIN / m);
+}
+
+const HETERO_PENALTY ={ N: 0.35, S: 0.80, P: 1.00, Cl: 1.00, F: 1.40, Na: 1.20,
   K: 1.80, Si: 1.50, Br: 1.90, Fe: 2.60, Cu: 2.60, Zn: 2.60, Cr: 2.20,
   Ti: 2.60, B: 2.40, Li: 2.40, I: 2.20 };
 const A2_WINDOW = ['S', 'Cl', 'Br', 'K', 'Si', 'Cu', 'Zn', 'Ti', 'Cr'];
@@ -346,21 +385,128 @@ function signalsBlock(rows, layer) {
 
 /* The structure thumbnail. The box is sized in CSS before the file is fetched,
    so a slow or missing SVG cannot reflow the card, and a file that 404s hides
-   itself rather than leaving the browser's broken-image glyph. */
+   itself rather than leaving the browser's broken-image glyph.
+
+   The plate under the drawing is light in BOTH themes. These SVGs are dark
+   line art, and the old fix inverted them on the dark theme -- which turns a
+   structure into a photographic negative, wedge bonds and all. Chemists read
+   structures as ink on paper, so the paper stays white and the ink stays dark;
+   the border and rounded corners are what make that light rectangle read as a
+   deliberate drawing surface rather than as a rendering fault.
+
+   The thumbnail is a <button>, not a div with a click handler: Enter, Space,
+   focus ring and the accessibility tree all come for free, and every one of
+   them would otherwise have to be reimplemented by hand. */
 function structureFigure(r) {
   const src = structPath(r);
   if (!src) return null;
-  const wrap = el('div', 'struct-wrap');
+  const name = String(r[F.name] || 'this compound');
+  const alt = 'Chemical structure of ' + name;
+  const btn = el('button', 'struct-wrap');
+  btn.type = 'button';
+  btn.title = 'Enlarge this structure';
+  btn.setAttribute('aria-label', alt + ' — enlarge');
   const img = document.createElement('img');
   img.className = 'struct-thumb';
   img.loading = 'lazy';
   img.decoding = 'async';
   img.width = 72; img.height = 72;
-  img.alt = 'Chemical structure of ' + (r[F.name] || 'this compound');
-  img.addEventListener('error', () => { wrap.hidden = true; });
+  img.alt = '';                       // the button already carries the label
+  img.addEventListener('error', () => { btn.hidden = true; });
   img.src = src;
-  wrap.append(img);
-  return wrap;
+  btn.append(img);
+  btn.addEventListener('click', () => openStruct(src, alt, name));
+  return btn;
+}
+
+/* --------------------------------------------------------- enlarged dialog
+   One overlay is built lazily and reused, so a page holding sixty cards holds
+   one dialog rather than sixty. While it is open the keyboard cannot leave it
+   (a modal you can Tab out of is not modal), Escape and a click on the backdrop
+   both dismiss it, and focus returns to the thumbnail that opened it -- without
+   that last step a keyboard user is dumped back at the top of the document.
+
+   The body is a SLOT rather than a fixed <img>: the structure thumbnail and the
+   MS2 fragment plot are the same interaction -- a small locked-aspect figure on
+   a card that opens larger -- and giving the second one its own dialog would be
+   two focus traps, two Escape handlers and two ways to strand the document. */
+let STRUCT_UI = null, STRUCT_RETURN = null;
+
+function structOverlay() {
+  if (STRUCT_UI) return STRUCT_UI;
+  const back = el('div', 'struct-overlay');
+  back.hidden = true;
+  back.setAttribute('role', 'dialog');
+  back.setAttribute('aria-modal', 'true');
+  const panel = el('div', 'struct-panel');
+  const cap = el('div', 'struct-caption');
+  const body = el('div', 'overlay-body');
+  const close = el('button', 'ghost-btn struct-close', 'Close');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Close this enlarged view');
+  panel.append(cap, body, close);
+  back.append(panel);
+  // only a click on the backdrop itself dismisses; a click that started inside
+  // the panel and drifted out must not close the thing the user is reading
+  back.addEventListener('click', e => { if (e.target === back) closeStruct(); });
+  close.addEventListener('click', closeStruct);
+  document.body.append(back);
+  STRUCT_UI = { back: back, panel: panel, body: body, cap: cap, close: close };
+  return STRUCT_UI;
+}
+
+/* Put any node in the one dialog. Callers own what they hand over; this owns
+   the focus trap, the scroll lock and the return of focus. */
+function openOverlay(node, caption, label) {
+  const o = structOverlay();
+  STRUCT_RETURN = document.activeElement;
+  o.body.textContent = '';
+  o.body.append(node);
+  o.cap.textContent = caption;
+  o.back.setAttribute('aria-label', label);
+  o.back.hidden = false;
+  // the page behind must not scroll under the dialog on a phone; the class is
+  // removed on every close path below, so this can never strand the document
+  document.documentElement.classList.add('struct-open');
+  o.close.focus();
+  document.addEventListener('keydown', structKeys, true);
+}
+
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function structKeys(e) {
+  if (!STRUCT_UI || STRUCT_UI.back.hidden) return;
+  if (e.key === 'Escape' || e.key === 'Esc') { e.preventDefault(); closeStruct(); return; }
+  if (e.key !== 'Tab') return;
+  const f = [].slice.call(STRUCT_UI.panel.querySelectorAll(FOCUSABLE))
+    .filter(n => !n.disabled && n.getAttribute('aria-hidden') !== 'true');
+  if (!f.length) { e.preventDefault(); return; }
+  const first = f[0], last = f[f.length - 1], act = document.activeElement;
+  if (!STRUCT_UI.panel.contains(act)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && act === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && act === last) { e.preventDefault(); first.focus(); }
+}
+
+function openStruct(src, alt, name) {
+  const plate = el('div', 'struct-plate');
+  const img = document.createElement('img');
+  img.className = 'struct-big';
+  img.alt = alt;
+  img.src = src;
+  plate.append(img);
+  openOverlay(plate, name, 'Enlarged chemical structure');
+}
+
+function closeStruct() {
+  if (!STRUCT_UI || STRUCT_UI.back.hidden) return;
+  STRUCT_UI.back.hidden = true;
+  // drop the enlarged content: an <img> left with a src keeps its decoded
+  // bitmap alive, and a stale peak table would flash on the next open
+  STRUCT_UI.body.textContent = '';
+  document.documentElement.classList.remove('struct-open');
+  document.removeEventListener('keydown', structKeys, true);
+  const back = STRUCT_RETURN;
+  STRUCT_RETURN = null;
+  if (back && back.focus && document.contains(back)) back.focus();
 }
 
 /* ---------------------------------------------------------------- disclosure
@@ -388,6 +534,374 @@ function evBlock(title, items, cls) {
   items.forEach(t => ul.append(el('li', null, t)));
   b.append(ul);
   return b;
+}
+
+/* ====================================================== MS2 fragment spectra
+   What a card can say about fragments has four distinct states, and the whole
+   point of this section is that they are not collapsed into one:
+
+     records    ms2/<IKEY>.json lists accessioned public MS2 records. Some ship
+                their peaks here, some are a link to the original -- see below.
+     zero       the compound HAS a resolved structure and the libraries were
+                searched on it, and nothing came back. A measured zero.
+     silent     the row has no single structure (a homologous series, an
+                oligomer envelope, an unassigned background ion), so no library
+                was ever searched. Nothing is known and nothing is claimed --
+                this must never render as "0 spectra".
+     legacy     the bundle predates the ms2rec/ms2pk columns. Feature-detected:
+                fall back to the census count and let the drawer resolve it.
+
+   Nothing here is fetched at render time. A search that returns sixty cards
+   must cost zero MS2 requests; the file is pulled when a drawer is opened, once
+   per compound, and a miss is remembered so a missing file cannot be retried in
+   a loop. */
+const MS2_SHOWN = 6;              // records rendered before the "show the rest"
+const MS2_PLOT_W = 320, MS2_PLOT_H = 110;   // the locked aspect ratio, see CSS
+const MS2_INDEX = { state: 'idle', map: null };
+let MS2_INDEX_WAIT = null;        // the single in-flight index request
+const MS2_LOADS = new Map();      // ikey -> Promise<doc|null>, resolved once
+
+/* ms2/index.json is the manifest that lets a lookup avoid a 404. It is fetched
+   at most ONCE per session, on the first drawer a user opens, and a failure is
+   sticky: an older cached bundle without the manifest must degrade to "try the
+   file and accept a miss", not to a request per card. */
+function ms2IndexLoad() {
+  if (MS2_INDEX_WAIT) return MS2_INDEX_WAIT;
+  MS2_INDEX.state = 'loading';
+  MS2_INDEX_WAIT = fetch('ms2/index.json')
+    .then(res => res.ok ? res.json() : null)
+    .catch(() => null)
+    .then(doc => {
+      const files = doc && doc.files;
+      if (files && typeof files === 'object') { MS2_INDEX.map = files; MS2_INDEX.state = 'ready'; }
+      else MS2_INDEX.state = 'absent';
+      return MS2_INDEX;
+    });
+  return MS2_INDEX_WAIT;
+}
+
+function ms2Load(ikey) {
+  if (MS2_LOADS.has(ikey)) return MS2_LOADS.get(ikey);
+  const wait = ms2IndexLoad().then(ix => {
+    // the manifest exists precisely so that a compound with no file costs no
+    // request at all; only when there is no manifest do we risk the 404
+    if (ix.state === 'ready' &&
+        !Object.prototype.hasOwnProperty.call(ix.map, ikey)) return null;
+    return fetch('ms2/' + encodeURIComponent(ikey) + '.json')
+      .then(res => res.ok ? res.json() : null);
+  }).catch(() => null);
+  MS2_LOADS.set(ikey, wait);
+  return wait;
+}
+
+/* An optional NUMERIC column. Same contract as optCol: absent column, absent
+   value and unparseable value are all "we do not know", which is not zero. */
+function optNum(r, key) {
+  const v = optCol(r, key).trim();
+  return /^-?\d+(?:\.\d+)?$/.test(v) ? parseFloat(v) : null;
+}
+
+function ms2Facts(r) {
+  const ikey = optCol(r, 'ikey').trim().toUpperCase();
+  const keyed = IKEY_RE.test(ikey);
+  const rec = optNum(r, 'ms2rec'), pk = optNum(r, 'ms2pk');
+  const census = optNum(r, 'ms2n');
+  let kind;
+  if (!keyed) kind = 'silent';
+  else if (rec == null) kind = (census && census > 0) ? 'legacy' : 'silent';
+  else if (rec > 0) kind = 'records';
+  else kind = 'zero';
+  return { ikey: keyed ? ikey : '', kind: kind, rec: rec, pk: pk, census: census };
+}
+
+/* A link, but only when the whole value really is one. Everything in an MS2
+   record is third-party text: an accession, a library name and a URL all arrive
+   from MassBank, GNPS or MoNA and none of them is trusted. Text goes in through
+   textContent, and a value that is not an http(s) URL -- javascript:, data:, a
+   relative path, a URL with a quote or a tag in it -- is printed, never linked. */
+const SAFE_URL_RE = /^https?:\/\/[^\s"'<>]+$/;
+function ms2Link(url, label) {
+  const text = String(label == null ? url : label);
+  if (!SAFE_URL_RE.test(String(url || ''))) return el('span', null, text);
+  const a = el('a', 'ms2-link', text);
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  return a;
+}
+
+/* The fragment plot. An SVG built through the DOM, so no peak value can ever be
+   parsed as markup, and sized by viewBox alone: the box's aspect ratio is fixed
+   in CSS before the fetch lands, so a slow file cannot reflow the card. */
+function ms2Plot(peaks, big) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 ' + MS2_PLOT_W + ' ' + MS2_PLOT_H);
+  svg.setAttribute('class', 'ms2-plot' + (big ? ' ms2-plot-big' : ''));
+  svg.setAttribute('role', 'img');
+  const mk = (tag, attrs) => { const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+
+  const lo = Math.min.apply(null, peaks.map(p => p[0]));
+  const hi = Math.max.apply(null, peaks.map(p => p[0]));
+  // a one-peak spectrum has no range at all; pad it so the single bar lands in
+  // the middle of the axis rather than on a division by zero
+  const pad = Math.max((hi - lo) * 0.06, 0.5);
+  const x0 = lo - pad, x1 = hi + pad;
+  const L = 4, R = MS2_PLOT_W - 4, T = 10, B = MS2_PLOT_H - 16;
+  const X = mz => L + (mz - x0) / (x1 - x0) * (R - L);
+  const Y = it => B - Math.max(Math.min(it, 100), 0) / 100 * (B - T);
+
+  const title = document.createElementNS(NS, 'title');
+  title.textContent = peaks.length + ' fragment peaks from m/z ' +
+    peaks[0][0].toFixed(4) + ' to ' + peaks[peaks.length - 1][0].toFixed(4) +
+    '; base peak m/z ' + peaks.reduce((a, p) => p[1] > a[1] ? p : a, peaks[0])[0].toFixed(4);
+  svg.append(title);
+  svg.append(mk('line', { x1: L, y1: B, x2: R, y2: B, class: 'ms2-axis' }));
+  peaks.forEach(p => {
+    svg.append(mk('line', { x1: X(p[0]).toFixed(2), y1: B,
+      x2: X(p[0]).toFixed(2), y2: Y(p[1]).toFixed(2), class: 'ms2-bar' }));
+  });
+  // Label the tallest few only -- every peak labeled is no peak labeled -- and
+  // drop any label that would land on top of one already placed. Two m/z values
+  // printed over each other are worse than one printed alone.
+  const placed = [];
+  peaks.slice().sort((a, b) => b[1] - a[1]).forEach(p => {
+    if (placed.length >= (big ? 6 : 3)) return;
+    const x = X(p[0]);
+    if (placed.some(q => Math.abs(q - x) < 34)) return;
+    placed.push(x);
+    const t = mk('text', { x: x.toFixed(2), y: Math.max(Y(p[1]) - 2.5, 7).toFixed(2),
+      class: 'ms2-lab', 'text-anchor': x > (L + R) / 2 ? 'end' : 'start' });
+    t.textContent = p[0].toFixed(4);
+    svg.append(t);
+  });
+  [[L, x0, 'start'], [R, x1, 'end']].forEach(a => {
+    const t = mk('text', { x: a[0], y: MS2_PLOT_H - 4, class: 'ms2-ax-lab', 'text-anchor': a[2] });
+    t.textContent = a[1].toFixed(1);
+    svg.append(t);
+  });
+  return svg;
+}
+
+function ms2PeakTable(peaks) {
+  const wrap = el('div', 'scroll-x ms2-scroll');
+  const tbl = el('table', 'peaks ms2-peaks');
+  const thead = el('thead'), htr = el('tr');
+  htr.append(el('th', 'num', 'Fragment m/z'), el('th', 'num', '% base peak'));
+  thead.append(htr);
+  const tb = el('tbody');
+  peaks.forEach(p => {
+    const tr = el('tr');
+    tr.append(el('td', 'num', Number(p[0]).toFixed(4)),
+              el('td', 'num', Number(p[1]).toFixed(1)));
+    tb.append(tr);
+  });
+  tbl.append(thead, tb);
+  wrap.append(tbl);
+  return wrap;
+}
+
+/* The acquisition conditions, printed verbatim. A fragment list without its
+   collision energy is not interpretable, and an absent field is left out
+   rather than filled with "unknown" -- the record did not state it.
+   The collision energy keeps whatever unit the record used, and gets none
+   invented for it: MassBank ships bare "10" for both volts and eV. */
+function ms2Conditions(s) {
+  const bits = [];
+  if (s.adduct) bits.push(String(s.adduct));
+  if (s.pol) bits.push(String(s.pol) + ' ion mode');
+  if (s.prec != null && s.prec !== '') bits.push('precursor m/z ' + fmt(s.prec));
+  if (s.ce) bits.push('collision energy ' + String(s.ce));
+  if (s.inst) bits.push(String(s.inst));
+  return bits;
+}
+
+/* Attribution, per record, next to the spectrum it belongs to -- never pooled
+   into a footnote. The license on a shipped peak list is the condition under
+   which we are allowed to show it at all, so it travels with the peaks into the
+   enlarged view as well. An empty license string means NOT ESTABLISHED; it is
+   never rendered as unrestricted. */
+function ms2Cite(s) {
+  const p = el('p', 'micro ms2-cite');
+  if (s.lib) { p.append(el('b', null, String(s.lib))); p.append(document.createTextNode(' · ')); }
+  if (s.acc) { p.append(ms2Link(s.url, String(s.acc))); p.append(document.createTextNode(' · ')); }
+  else if (s.url) { p.append(ms2Link(s.url, 'original record'), document.createTextNode(' · ')); }
+  const lic = String(s.license || '').trim();
+  if (!lic) p.append(el('span', 'ms2-lic-none', 'license not established'));
+  else if (SAFE_URL_RE.test(String(s.license_url || '')))
+    p.append(ms2Link(s.license_url, lic));
+  else p.append(el('span', 'ms2-lic', lic));
+  return p;
+}
+
+function ms2Record(s, name) {
+  const box = el('div', 'ms2-rec' + (s.peaks && s.peaks.length ? '' : ' ms2-rec-ptr'));
+  const cond = ms2Conditions(s);
+  if (cond.length) box.append(el('p', 'micro ms2-cond', cond.join(' · ')));
+
+  if (s.peaks && s.peaks.length) {
+    const peaks = s.peaks.filter(p => p && p.length >= 2 && isFinite(p[0]) && isFinite(p[1]));
+    if (peaks.length) {
+      const btn = el('button', 'ms2-plot-wrap');
+      btn.type = 'button';
+      btn.title = 'Enlarge this spectrum';
+      btn.setAttribute('aria-label', 'Fragment spectrum, ' + peaks.length +
+        ' peaks — enlarge and list them');
+      btn.append(ms2Plot(peaks, false));
+      btn.addEventListener('click', () => {
+        const body = el('div', 'ms2-big');
+        if (cond.length) body.append(el('p', 'micro ms2-cond', cond.join(' · ')));
+        body.append(ms2Plot(peaks, true));
+        body.append(ms2PeakTable(peaks));
+        body.append(el('p', 'micro', 'Intensities are percent of the base peak.' +
+          (s.peaks_capped ? ' Truncated to the most intense ' + peaks.length +
+            ' of ' + (s.npeaks || peaks.length) + ' peaks in the original record.' : '')));
+        // the license travels with the peaks: this view is a copy of them
+        body.append(ms2Cite(s));
+        openOverlay(body, name || 'Fragment spectrum', 'Enlarged fragment spectrum');
+      });
+      box.append(btn);
+      box.append(el('p', 'mono-small ms2-frag',
+        peaks.slice().sort((a, b) => b[1] - a[1]).slice(0, 8)
+          .map(p => Number(p[0]).toFixed(4) + ' (' + Number(p[1]).toFixed(0) + '%)').join(' · ') +
+        (peaks.length > 8 ? ' · +' + (peaks.length - 8) + ' more' : '')));
+    }
+  } else {
+    // pointer-only is a RESULT, not a failure: the reader gets the conditions,
+    // the accession and a working link to the peaks at the source
+    const lic = String(s.license || '').trim();
+    box.append(el('p', 'micro ms2-ptr-why',
+      'Peaks not republished here — ' +
+      (lic ? 'this record is ' + lic + ', which does not permit it.'
+           : 'this record states no license, and an unstated license is not permission.')));
+    if (SAFE_URL_RE.test(String(s.url || ''))) {
+      const a = ms2Link(s.url, 'Open ' + (s.acc ? String(s.acc) : 'the record') +
+        (s.lib ? ' at ' + String(s.lib) : '') + ' ↗');
+      a.className = 'ms2-open-btn';
+      box.append(a);
+    }
+  }
+  box.append(ms2Cite(s));
+  return box;
+}
+
+/* Records in the card's own polarity first. An MS2 file is keyed on the
+   COMPOUND, so it holds both polarities and every adduct; the ion on the card
+   is one of them, and the record that was acquired the same way round is the
+   one worth reading first. Order is otherwise left as published. */
+function ms2Order(spectra, obs) {
+  const want = obs && obs.polarity === 'neg' ? 'negative'
+             : obs && obs.polarity === 'pos' ? 'positive' : '';
+  if (!want) return spectra.slice();
+  const mine = [], rest = [];
+  spectra.forEach(s => (String(s.pol || '') === want ? mine : rest).push(s));
+  return mine.concat(rest);
+}
+
+function ms2Body(doc, obs, facts) {
+  const box = el('div', 'ms2-body');
+  const name = (doc.names && doc.names.length) ? String(doc.names[0]) : '';
+  const spectra = (doc.spectra || []).filter(s => s && typeof s === 'object');
+  const nRec = spectra.length;
+  const nPk = spectra.filter(s => s.peaks && s.peaks.length).length;
+  const nPtr = nRec - nPk;
+
+  let lead = nRec + (nRec === 1 ? ' public MS2 record' : ' public MS2 records') +
+    (name ? ' for ' + name : '') + '. ';
+  if (nPk && nPtr) lead += 'The fragments of ' + nPk + ' are shown here under that ' +
+    "record's own license; " + nPtr + ' are link-only, because theirs does not ' +
+    'permit republication.';
+  else if (nPk) lead += 'The fragments of all of them are shown here, each under ' +
+    "that record's own license.";
+  else lead += 'None of them may be republished here — every one is link-only, so ' +
+    'the accession opens the peaks at the source. That is an established zero for ' +
+    'redistributable fragments, not an absence of spectra.';
+  box.append(el('p', 'micro ms2-lead', lead));
+  if (doc.truncated) box.append(el('p', 'micro',
+    doc.truncated + ' further records were found and are not listed here.'));
+
+  const ordered = ms2Order(spectra, obs);
+  const holder = el('div', 'ms2-recs');
+  const draw = (from, to) => { for (let i = from; i < to; i++) holder.append(ms2Record(ordered[i], name)); };
+  draw(0, Math.min(MS2_SHOWN, ordered.length));
+  box.append(holder);
+  if (ordered.length > MS2_SHOWN) {
+    const more = el('button', 'ghost-btn ms2-more',
+      'Show the remaining ' + (ordered.length - MS2_SHOWN) + ' records');
+    more.type = 'button';
+    more.addEventListener('click', () => { draw(MS2_SHOWN, ordered.length); more.remove(); });
+    box.append(more);
+  }
+  if (facts.census != null && facts.census > 0)
+    box.append(el('p', 'micro ms2-census',
+      'A harmonized aggregate of the public libraries counts ' + facts.census +
+      ' spectra for this structure. It carries no per-record license and no ' +
+      'accession, so those cannot be cited or shown; the records above can.'));
+  box.append(el('p', 'micro',
+    'Peaks are republished only under a license that permits it (CC0, CC BY, ' +
+    'dl-de/by-2-0). Matching is on the 14-character InChIKey skeleton of the ' +
+    'compound, so a record may be a different adduct or polarity from the ion above.'));
+  return box;
+}
+
+/* The card's MS2 section. Collapsed, and empty until opened. */
+function ms2Block(rows, obs, key) {
+  const r = rows[0];
+  if (!r) return null;
+  const facts = ms2Facts(r);
+
+  if (facts.kind === 'silent') return null;   // said in the detail drawer instead
+
+  if (facts.kind === 'zero') {
+    // an established zero, and worth its own line: the libraries WERE searched,
+    // on a resolved structure, and returned nothing. Distinct from "silent",
+    // where there was no structure to search on and nothing is claimed.
+    const b = el('div', 'ms2-zero');
+    b.append(el('div', 'ms2-zero-head', 'No public MS2 spectrum found'));
+    b.append(el('p', 'micro',
+      "This compound's structure is resolved, and the public libraries were " +
+      'searched on it: no accessioned MS2 record came back. That is a measured ' +
+      'zero, not an unasked question — and for a contaminant it is the normal ' +
+      'result, because the reference libraries are built from metabolites and drugs.' +
+      (facts.census != null && facts.census > 0
+        ? ' An aggregate census does count ' + facts.census + ' spectra for this ' +
+          'structure, but none carries a citable accession or license.' : '')));
+    return b;
+  }
+
+  const n = facts.rec, p = facts.pk;
+  let sum = 'Fragment spectra (MS2)';
+  if (n != null && n > 0) {
+    sum += ' · ' + n + (n === 1 ? ' record' : ' records');
+    if (p != null) sum += p > 0 ? ', ' + p + ' with peaks' : ', all link-only';
+  }
+  const det = drawer(key, sum);
+  det.className = 'ms2-drawer';
+  const slot = el('div', 'ms2-slot');
+  det.append(slot);
+  let started = false;
+  // THE lazy step. Nothing is fetched on render, on a search or on a re-render;
+  // the request happens on the first open and never again -- ms2Load caches the
+  // promise, misses included, so reopening reuses what is already in hand.
+  const fill = () => {
+    if (!det.open || started) return;
+    started = true;
+    slot.append(el('p', 'micro', 'Loading the fragment records…'));
+    ms2Load(facts.ikey).then(doc => {
+      slot.textContent = '';
+      if (doc && doc.spectra && doc.spectra.length) slot.append(ms2Body(doc, obs, facts));
+      else slot.append(el('p', 'micro',
+        'The fragment records for this compound are not in this copy of the ' +
+        'data. They live in ms2/' + facts.ikey + '.json beside the main table.'));
+    });
+  };
+  det.addEventListener('toggle', fill);
+  // a drawer the user already opened is re-created open by DRAWER_STATE on the
+  // next render, and that fires no toggle event -- without this the reopened
+  // drawer would sit empty forever
+  if (det.open) fill();
+  return det;
 }
 
 /* ================================== render-time merge of near-duplicate rows
@@ -454,7 +968,7 @@ function sameCompoundRow(a, b) {
   const ma = a[F.mz], mb = b[F.mz];
   if (!isFinite(ma) || !isFinite(mb)) return false;
   // proximity, not the search window: at a nominal +-0.5 Da query the window
-  // spans hundreds of unrelated compounds and must never authorise a merge
+  // spans hundreds of unrelated compounds and must never authorize a merge
   if (Math.abs(ma - mb) > Math.max(0.0015, ma * 4e-6)) return false;
   const ia = optCol(a, 'ionf'), ib = optCol(b, 'ionf');
   if (ia && ib && ia !== ib) return false;              // known, and different
@@ -496,6 +1010,66 @@ const prettyCat = c => c.replace(/_/g, ' ').replace(/\b(peg|ppg|ms1|ms2)\b/gi, m
 const fmt = (v, n = 4) => (v == null || v === '') ? '—' : Number(v).toFixed(n);
 const num = id => { const v = parseFloat($(id).value); return isNaN(v) ? null : v; };
 const ppmOf = (obs, calc) => (obs - calc) / calc * 1e6;
+
+/* ------------------------------------------------------- intensity parsing
+   Peak intensities are read off an instrument, so they arrive in whatever the
+   vendor prints: 1.43e6, 1.43E+6, 124000, 1,240,000, 1 240 000, and in a
+   European export 1.240.000 or 8,7. parseFloat alone gets three of those
+   wrong and, worse, gets them wrong QUIETLY -- parseFloat('1,240,000') is 1,
+   which would turn a base peak into a ratio of a million.
+
+   Returns a number, or the string 'bad' for something that is not a number at
+   all, or null for an empty field. Three outcomes, because "left blank" and
+   "typed nonsense" have to be handled differently: one is silence, the other
+   has to be reported. The grouping rules mirror markEvidence()/
+   firstNumericToken() in the peak-list parser, which faces the same ambiguity.*/
+const INTENSITY_RE = /^\d*\.?\d+(?:[eE][+-]?\d+)?$/;
+function parseIntensity(raw) {
+  let s = String(raw == null ? '' : raw).trim()
+    .replace(/[\s   ']/g, '')   // 1 240 000 / 1 240 000 / 1'240'000
+    .replace(/^\+/, '');
+  if (!s) return null;
+  const dot = s.indexOf('.') >= 0, comma = s.indexOf(',') >= 0;
+  if (dot && comma) {
+    // the LAST mark is the decimal point, and only if the other one groups
+    // three digits throughout -- 1,240.5 and 1.240,5
+    const li = Math.max(s.lastIndexOf('.'), s.lastIndexOf(','));
+    const mark = s.charAt(li), head = s.slice(0, li), tail = s.slice(li + 1);
+    const grouped = mark === ',' ? /^\d{1,3}(?:\.\d{3})+$/.test(head)
+                                 : /^\d{1,3}(?:,\d{3})+$/.test(head);
+    if (!grouped || !/^\d+$/.test(tail)) return 'bad';
+    s = head.replace(/[.,]/g, '') + '.' + tail;
+  } else if (comma) {
+    // 1,240,000 groups; 8,7 and 1,4567 are a decimal comma
+    if (/^\d{1,3}(?:,\d{3})+$/.test(s)) s = s.replace(/,/g, '');
+    else if (/^\d+,\d+$/.test(s)) s = s.replace(',', '.');
+    else return 'bad';
+  } else if (/^\d{1,3}(?:\.\d{3}){2,}$/.test(s)) {
+    // TWO or more groups: 1.240.000 can only be dot-grouping. A single group is
+    // left alone, because "1.240" is far more likely to be 1.24 typed with a
+    // trailing zero than a European thousand, and guessing wrong there is a
+    // factor of a thousand.
+    s = s.replace(/\./g, '');
+  }
+  if (!INTENSITY_RE.test(s)) return 'bad';
+  const v = parseFloat(s);
+  return isFinite(v) ? v : 'bad';
+}
+
+/* Percent of base peak, from two absolute intensities. Everything downstream of
+   here still speaks percent -- this is an input-format change, not a change to
+   the isotope reasoning -- so the conversion happens once, at the boundary.
+
+   The rounding is not cosmetic. Typing "8.67" and typing "1.43e6 / 1.24e5"
+   have to reach the engine as the SAME number, or the two ways of describing
+   one envelope would score differently. Two decimals is the precision a human
+   types a percentage to; below 1% the extra digits are kept because a 0.03%
+   satellite is a real measurement. */
+function pctOf(sat, base) {
+  if (sat == null || base == null || !(base > 0)) return null;
+  const p = 100 * sat / base;
+  return Number(p.toFixed(p >= 1 ? 2 : 5));
+}
 
 /* ============================================================ input parsing */
 /* `371+1` is deliberately rejected: it reads as arithmetic, and M+1 already
@@ -562,7 +1136,7 @@ function toleranceFor(mz, decimals) {
   const mode = $('tolMode').value;
   if (mode === 'ppm') return mz * (parseFloat($('tolValue').value) || 10) / 1e6;
   if (mode === 'da') return parseFloat($('tolValue').value) || 0.01;
-  // A quadrupole or ion trap reports a nominal mass. Honouring typed decimals
+  // A quadrupole or ion trap reports a nominal mass. Honoring typed decimals
   // there would pretend to an accuracy the instrument cannot deliver, so unit
   // mode fixes the window at half a Dalton however precisely the user types.
   if (unitResolution()) return 0.5;
@@ -573,7 +1147,7 @@ function toleranceFor(mz, decimals) {
 
 // Window for matching an observed isotope OFFSET to a specific nuclide.
 //
-// This was called but never defined, so entering any B+1 m/z threw a
+// This was called but never defined, so entering any B1 m/z threw a
 // ReferenceError that aborted the render and left the previous query's cards on
 // screen -- the app showed a confident answer for a different ion. The isotope
 // engine had therefore never executed in production.
@@ -609,12 +1183,12 @@ function inferCharge(mz, b1mz) {
     const z = Math.round(raw);
     if (z >= 1 && z <= 8 && Math.abs(raw - z) / z <= 0.15) {
       return { z: z, strength: 'strong', why:
-        'the B+1 peak sits ' + gap.toFixed(4) + ' above the base peak, and 1.0034 ÷ ' +
+        'the B1 peak sits ' + gap.toFixed(4) + ' above the base peak, and 1.0034 ÷ ' +
         gap.toFixed(4) + ' = ' + raw.toFixed(2) + ' → z = ' + z +
         ' (the reference spacing for ' + z + '+ is ' + SPACING_TABLE[z - 1].toFixed(4) + ')' };
     }
     return { z: 1, strength: 'weak', why:
-      'the B+1 spacing of ' + gap.toFixed(4) + ' is not within 15% of any 1.0034/z, so it may not be an ' +
+      'the B1 spacing of ' + gap.toFixed(4) + ' is not within 15% of any 1.0034/z, so it may not be an ' +
       'isotope of this ion at all; assuming z = 1' };
   }
   const defect = mz - Math.round(mz);
@@ -627,35 +1201,35 @@ function inferCharge(mz, b1mz) {
       ' is outside anything a singly charged C,H,N,O,S,P,Na,K,Cl,F,Si ion can reach at this m/z → 2+' };
     return { z: 2, strength: 'weak', why:
       'the fractional part is ' + frac.toFixed(3) + ', which usually means 2+ — though above about m/z 450 a ' +
-      'genuine 1+ lipid can also sit near .5, so confirm with the B+1 spacing' };
+      'genuine 1+ lipid can also sit near .5, so confirm with the B1 spacing' };
   }
   if ((frac >= 0.28 && frac < 0.40) || (frac > 0.60 && frac <= 0.72)) {
     return { z: 1, strength: 'weak', possible: 3, why:
       'the fractional part is ' + frac.toFixed(3) + ', which is consistent with 3+, but the fraction alone ' +
-      'degenerates above 2+ — z = 3 is a possibility, not a call. Enter the B+1 m/z to settle it.' };
+      'degenerates above 2+ — z = 3 is a possibility, not a call. Enter the B1 m/z to settle it.' };
   }
-  return { z: 1, strength: 'assumed', why: 'no B+1 m/z given and the mass defect is inside the 1+ envelope, so z = 1 is assumed' };
+  return { z: 1, strength: 'assumed', why: 'no B1 m/z given and the mass defect is inside the 1+ envelope, so z = 1 is assumed' };
 }
 
 /* ======================================================= isotope interpretation */
 function interpretIsotopes(obs) {
   const out = { evidence: [], caveats: [], required: {}, forbidden: [],
-                a1pct: null, a2pct: null, a1elements: [], notes: [] };
+                a1pct: null, a2pct: null, a1elements: [], a1nuclide: null, notes: [] };
   const z = obs.charge;
   const tolB = toleranceFor(obs.mz, obs.decimals);
 
-  /* ---- guard 1: satellite of a neighbour ---- */
+  /* ---- guard 1: satellite of a neighbor ---- */
   const sats = [];
-  if (obs.b1pct != null) sats.push(['B+1', obs.b1pct]);
-  if (obs.b2pct != null) sats.push(['B+2', obs.b2pct]);
+  if (obs.b1pct != null) sats.push(['B1', obs.b1pct]);
+  if (obs.b2pct != null) sats.push(['B2', obs.b2pct]);
   for (const s of sats) {
     if (s[1] > 100) {
       out.caveats.push('The ' + s[0] + ' peak you entered is ' + s[1] + '% of the peak you called the base peak. ' +
         'A satellite cannot exceed its own base peak — this m/z is a satellite of a larger ion nearby, ' +
         'not an ion in its own right. Re-run using the taller peak as B0.');
-    } else if (s[1] > 50 && s[0] === 'B+1') {
+    } else if (s[1] > 50 && s[0] === 'B1') {
       out.caveats.push('A ' + s[0] + ' at ' + s[1] + '% of B0 is very large for an A+1. Unless the ion carries ' +
-        'many carbons, check that this peak is not itself a satellite of a bigger neighbour.');
+        'many carbons, check that this peak is not itself a satellite of a bigger neighbor.');
     }
   }
 
@@ -663,19 +1237,36 @@ function interpretIsotopes(obs) {
   if (obs.b1mz != null) {
     const offset = (obs.b1mz - obs.mz) * z;      // per-charge spacing to real mass
     const tol = isoOffsetTol(obs, obs.b1mz, obs.b1decimals);
+    // Mass of the ion itself, which is what an atom count has to fit inside.
+    // m/z * z is exact enough here; the electron mass is four orders of
+    // magnitude below one atom of the lightest element on the table.
+    const ionMass = obs.mz * z;
     const hits = [];
     for (const e of A1_OFFSETS) {
       if (Math.abs(offset - e.off) > tol) continue;
       const h = { entry: e, dev: Math.abs(offset - e.off), n: null, nInt: null,
                   ok: true, why: [], massScore: Math.abs(offset - e.off) / tol, intScore: 0 };
       if (obs.b1pct != null && e.per) {
+        const intTol = Math.max(1.5, 0.25 * obs.b1pct);
         h.n = obs.b1pct / e.per;
         h.nInt = Math.max(1, Math.round(h.n));
-        h.intScore = Math.abs(obs.b1pct - h.nInt * e.per) / Math.max(1.5, 0.25 * obs.b1pct);
-        if (e.kind === 'metal') {
-          if (h.n < 0.6 || h.n > 2.6) { h.ok = false; h.why.push('would need ' + h.n.toFixed(1) + ' atoms'); }
-        } else if (e.el === 'Si' || e.el === 'S') {
-          if (h.n > (CAPS[e.el] + 0.6)) { h.ok = false; h.why.push('would need ' + h.n.toFixed(1) + ' atoms'); }
+        h.intScore = Math.abs(obs.b1pct - h.nInt * e.per) / intTol;
+        // The widest atom count the measured intensity still supports, both ways.
+        // Only readings that fail at BOTH edges are rejected — an element is
+        // ruled out when even the most generous reading cannot work, never
+        // because this app's formula generator would not have enumerated it.
+        const nLo = Math.max(0, obs.b1pct - intTol) / e.per;
+        const nHi = (obs.b1pct + intTol) / e.per;
+        const nCap = maxAtomsInIon(e.el, ionMass);
+        if (nHi < MIN_ATOMS) {
+          h.ok = false;
+          h.why.push('one ' + e.el + ' alone would predict ' + e.per.toFixed(1) +
+            '%, well above the ' + obs.b1pct + '% measured, and there is no such thing as ' +
+            'part of an atom');
+        } else if (nLo > nCap) {
+          h.ok = false;
+          h.why.push('would need at least ' + Math.ceil(nLo) + ' atoms, and ' + nCap + ' × ' +
+            e.el + ' already weighs more than this ion (' + ionMass.toFixed(2) + ' Da)');
         }
       }
       // metals are called on the PAIR, never on one satellite alone
@@ -691,9 +1282,11 @@ function interpretIsotopes(obs) {
     /* ---- guard 2: window merging above ~m/z 300 ---- */
     const c13hit = hits.filter(h => h.entry.el === 'C')[0];
     const heteroKept = keep.filter(h => h.entry.el !== 'C');
+    let windowMerged = false;
     if (obs.mz * z > 300 && heteroKept.length && c13hit) {
       const sep = Math.abs(heteroKept[0].entry.off - C13);
       if (sep < 2 * tol) {
+        windowMerged = true;
         out.caveats.push('At m/z ' + obs.mz.toFixed(4) + ' the ¹³C offset and the ' +
           heteroKept[0].entry.iso + ' offset differ by only ' + sep.toFixed(5) +
           ' Da, which your mass accuracy cannot resolve. No heteroatom is claimed from A+1 here — ' +
@@ -704,7 +1297,7 @@ function interpretIsotopes(obs) {
     }
 
     if (!keep.length) {
-      out.caveats.push('The B+1 spacing of ' + ((obs.b1mz - obs.mz)).toFixed(4) +
+      out.caveats.push('The B1 spacing of ' + ((obs.b1mz - obs.mz)).toFixed(4) +
         ' does not match any isotope offset at z = ' + z + '. It may belong to a different ion.');
     } else {
       keep.sort((a, b) => a.total - b.total);
@@ -716,35 +1309,72 @@ function interpretIsotopes(obs) {
                                                             ' predicts ' + (h.nInt * h.entry.per).toFixed(1) + '%');
         return t;
       });
-      out.evidence.push('B+1 exact mass, ranked on offset and intensity together: ' + named.join('; ') + '.');
+      out.evidence.push('B1 exact mass, ranked on offset and intensity together: ' + named.join('; ') + '.');
       const rejected = hits.filter(h => !h.ok);
       if (rejected.length) out.evidence.push('Ruled out at that offset: ' +
         rejected.map(h => h.entry.iso + ' (' + h.why.join('; ') + ')').join('; ') + '.');
 
-      // assert an element only when one candidate clearly dominates
+      // Assert an element only when one candidate clearly dominates AND the
+      // dominance was actually MEASURED.
+      //
+      // `total` is massScore + intScore, and intScore stays 0 for every
+      // candidate when no B1 intensity was entered (see its initialization
+      // above). `dominant` then collapses onto the mass offset alone -- which
+      // cannot carry the claim. At m/z 372 typed to four decimals isoOffsetTol
+      // is 1.9 mDa, while ²⁹Si (+0.99957) and ³³S (+0.99939) lie 0.18 mDa
+      // apart: the window is ten times the gap. Without this guard a B1 of
+      // 372.1008 asserted silicon and 372.1006 asserted sulfur off a difference
+      // the tolerance cannot see, and wrote it into out.required as a hard
+      // constraint on the formula generator -- with `best.nInt || 1` supplying
+      // the atom count, since nInt is null when nothing was measured. The
+      // carbon branch below always demanded an intensity; the heteroatom branch
+      // not demanding one was the oversight, not the design.
       const best = keep[0], second = keep[1];
+      const measured = obs.b1pct != null;
       const dominant = best.total < 0.5 && (!second || second.total > 3 * best.total);
-      if (dominant && best.entry.el !== 'C') {
+      if (dominant && measured && best.entry.el !== 'C') {
         out.required[best.entry.el] = best.nInt || 1;
         out.evidence.push('Only ' + best.entry.iso + ' fits that offset and that intensity together, so this ion ' +
           'contains ' + best.entry.el + '. Reading the same A+1 as ¹³C would have claimed ' +
-          Math.round((obs.b1pct || 0) / ISO.C.a1) + ' carbons that are not there — which is exactly the ' +
+          Math.round(obs.b1pct / ISO.C.a1) + ' carbons that are not there — which is exactly the ' +
           'failure this tool exists to stop.');
-      } else if (dominant && best.entry.el === 'C' && obs.b1pct != null) {
+      } else if (dominant && measured && best.entry.el === 'C') {
         out.evidence.push('A+1 of ' + obs.b1pct + '% at the ¹³C offset → about ' +
           Math.round(obs.b1pct / ISO.C.a1) + ' carbons.');
+      } else if (!measured) {
+        // Report what the offset admits; claim none of it. No element is named
+        // and nothing is written to out.required, because the only evidence
+        // that could separate these candidates was never supplied.
+        out.caveats.push('You gave a B1 m/z but no B1 intensity, so no element is claimed from it. ' +
+          'On the offset alone the candidates are ' + keep.map(h => h.entry.iso).join(', ') +
+          '. Their offsets sit well inside the ' + tol.toFixed(4) + ' Da window this m/z earns, so ' +
+          'the A+1 INTENSITY is the only thing that can separate them — enter the B1 height, and the ' +
+          'B0 height beside it, to turn this into a definite call.');
       } else if (keep.length > 1) {
         out.caveats.push('At your mass accuracy the ' + keep.map(h => h.entry.iso).join(', ') +
           ' offsets are not separated cleanly enough to name the element outright, so all of them stay on the ' +
-          'table. They are resolvable below about 5 ppm — more decimal places on the B+1 m/z would settle it.');
+          'table. They are resolvable below about 5 ppm — more decimal places on the B1 m/z would settle it.');
+      }
+
+      /* What quantity is a1pct, exactly?
+         The app has always compared it against the SUMMED A+1 of a candidate
+         formula. That is right when the A+1 nuclides are unresolved and B1 is
+         the whole satellite cluster. It is wrong when a single nuclide sits
+         alone in the window: there the user measured one peak — the ²⁹Si peak
+         of D5 is 25.4%, its ¹³C peak is a different m/z entirely — and scoring
+         a formula's total A+1 against it throws away every carbon-bearing
+         siloxane. Record which nuclide the number belongs to when exactly one
+         candidate is in the window and it was not merged by guard 2. */
+      if (keep.length === 1 && !windowMerged && !unitResolution() && obs.b1pct != null) {
+        out.a1nuclide = keep[0].entry.el;
       }
     }
     if (obs.b1pct != null) out.a1pct = obs.b1pct;
   } else if (obs.b1pct != null) {
     out.a1pct = obs.b1pct;
     out.evidence.push('A+1 of ' + obs.b1pct + '% — read as ¹³C that is about ' +
-      Math.round(obs.b1pct / ISO.C.a1) + ' carbons, but with no B+1 m/z the element behind it is unproven.');
-    out.caveats.push('Without the B+1 m/z, A+1 was assumed to be ¹³C. ²⁹Si, ³³S, ' +
+      Math.round(obs.b1pct / ISO.C.a1) + ' carbons, but with no B1 m/z the element behind it is unproven.');
+    out.caveats.push('Without the B1 m/z, A+1 was assumed to be ¹³C. ²⁹Si, ³³S, ' +
       '⁵³Cr and ⁵⁷Fe all sit within 0.004 Da of it and each would give a completely different formula.');
   }
 
@@ -754,21 +1384,28 @@ function interpretIsotopes(obs) {
     const tol2 = (tolB + toleranceFor(obs.b2mz, obs.b2decimals)) * z;
     const hits2 = A2_OFFSETS.filter(e => Math.abs(offset2 - e.off) <= tol2);
     if (hits2.length) {
-      out.evidence.push('B+2 exact mass matches ' + hits2.map(e => e.iso +
+      out.evidence.push('B2 exact mass matches ' + hits2.map(e => e.iso +
         ' (' + e.off.toFixed(5) + ')').join(' or ') + '; yours is ' + offset2.toFixed(5) + '.');
       const halogen = hits2.filter(e => e.el === 'Cl' || e.el === 'Br');
       if (hits2.length === 1 && hits2[0].el !== 'C2' && obs.b2pct != null) {
         const n = obs.b2pct / hits2[0].per;
-        if (n >= 0.6) {
+        // Same two bounds as the A+1 path: atoms are quantized below, and the
+        // ion's own mass is the ceiling above.
+        const nCap2 = maxAtomsInIon(hits2[0].el, obs.mz * z);
+        if (n >= MIN_ATOMS && n <= nCap2) {
           out.required[hits2[0].el] = Math.max(1, Math.round(n));
           out.evidence.push('At ' + obs.b2pct + '% that is ' + Math.round(n) + ' × ' + hits2[0].el + '.');
+        } else if (n > nCap2) {
+          out.caveats.push('An A+2 of ' + obs.b2pct + '% at the ' + hits2[0].iso + ' offset would take ' +
+            Math.ceil(n) + ' × ' + hits2[0].el + ', which weighs more than this ion, so no ' +
+            hits2[0].el + ' count is claimed from it.');
         }
       } else if (halogen.length && obs.b2pct != null && obs.b2pct >= 20) {
         out.evidence.push('An A+2 of ' + obs.b2pct + '% is halogen territory — probing A+2 only at the ' +
           'two-¹³C offset is what made every chlorinated species in the reference blank read "no halogen".');
       }
     } else {
-      out.caveats.push('The B+2 spacing of ' + (obs.b2mz - obs.mz).toFixed(4) +
+      out.caveats.push('The B2 spacing of ' + (obs.b2mz - obs.mz).toFixed(4) +
         ' matches no A+2 isotope offset at z = ' + z + '.');
     }
   }
@@ -811,7 +1448,12 @@ function passesFilters(r) {
   if (pol && r[F.pol] !== pol) return false;
   const cat = $('category').value;
   if (cat && r[F.cat] !== cat) return false;
-  if ($('onlyMs2').checked && !r[F.ms2n]) return false;
+  // "has a public MS2 spectrum" means EITHER count: the aggregate census
+  // (ms2n) and the accessioned records the card can actually show (ms2rec) do
+  // not agree -- 103 ions have a citable record and a census of zero, and this
+  // filter used to hide exactly those, which are the ones with real fragments
+  // behind them
+  if ($('onlyMs2').checked && !r[F.ms2n] && !optNum(r, 'ms2rec')) return false;
   if ($('onlyMulti').checked && (r[F.nsrc] || 1) < 2) return false;
   const ch = $('charge').value;
   if (ch && String(r[F.charge]) !== ch) return false;
@@ -904,12 +1546,13 @@ function layerLibrary(obs, iso) {
     // the same ion from a different contaminant is a different lead, and the
     // whole point of merging on ion identity was to keep those rather than
     // publish one row per spelling
+    // No cap and no "and N more". A truncated list of leads is a list the
+    // reader cannot act on, and the alternative that was cut is exactly as
+    // likely to be the right one as the three that survived.
     const altNames = splitList(optCol(r, 'altn'));
-    if (altNames.length) ev.push('the same ion also arises from ' +
-      altNames.slice(0, 3).join(', ') +
-      (altNames.length > 3 ? ' and ' + (altNames.length - 3) + ' more' : ''));
+    if (altNames.length) ev.push('the same ion also arises from ' + altNames.join(', '));
     const altAd = splitList(optCol(r, 'alta'));
-    if (altAd.length) ev.push('also written as ' + altAd.slice(0, 3).join(', '));
+    if (altAd.length) ev.push('also written as ' + altAd.join(', '));
     if (r[F.ms2n]) ev.push(r[F.ms2n] + ' public MS2 spectra exist for confirmation');
     if (r[F.fam] && r[F.spacing]) ev.push('member of the ' + r[F.fam] + ' series, members ' +
       fmt(r[F.spacing]) + ' apart' + (obs.charge > 1 ? ' (÷ ' + obs.charge + ' = ' +
@@ -933,7 +1576,7 @@ function layerLibrary(obs, iso) {
     // A source's nominal value is not an exact mass and must not be shown as
     // one, nor scored on a ppm error computed against it: m/z 45.0000 "formate"
     // otherwise ranks first at +0.0 ppm while the true 44.9982 entry is
-    // labelled +40 ppm -- exactly inverted.
+    // labeled +40 ppm -- exactly inverted.
     const basis = F.basis != null ? r[F.basis] : 'calc';
     if (basis === 'nominal') {
       cav.push('the source published only a nominal (integer) mass for this ion, ' +
@@ -972,7 +1615,7 @@ function layerLibrary(obs, iso) {
 
 /* ================================================ layer 2 — computed clusters */
 /* `f` is the elemental composition each unit contributes. It is what makes two
-   framings of the SAME ion recognisable as one: 2 formic acid - H + Na - H and
+   framings of the SAME ion recognizable as one: 2 formic acid - H + Na - H and
    formic acid + formate + Na - H are both C2H2NaO4, and ammonia from ammonium
    formate is the same NH3 as ammonia from ammonium acetate. Without a
    composition the code could only compare label strings, which differ. */
@@ -1085,14 +1728,19 @@ function layerClusters(obs, iso) {
             ', to ' + ppmOf(obs.mz, calc).toFixed(1) + ' ppm'];
           if (na) ev.push('includes ' + na + ' Na→H exchange (+' + NA_H.toFixed(5) +
             ' each) — sodium is present in every glass-contacting flow path');
-          if (units.length > 1) ev.push('a cluster ladder should be visible: neighbouring members at ' +
+          if (units.length > 1) ev.push('a cluster ladder should be visible: neighboring members at ' +
             (obs.mz - SOLVENTS[units[units.length - 1]].mass / z).toFixed(4) + ' and ' +
             (obs.mz + SOLVENTS[units[units.length - 1]].mass / z).toFixed(4) + ' m/z');
+          // No absolute retention time is quoted here on purpose: a time in
+          // minutes is a property of one gradient on one column, so it cannot
+          // be carried between methods. What the reader has to check is
+          // relative -- was this solvent in the mobile phase when the peak came
+          // off? -- and that question survives any gradient.
           const cav = ['Gradient consistency: this assumes ' +
             (solventNames.length ? solventNames.join(' and ') : 'the charge carrier') +
-            ' was actually flowing' + (obs.rt != null ? ' at ' + obs.rt + ' min' : ' at this retention time') +
-            '. Untick anything that was not — an [ACN+IPA+H]⁺ assignment once survived review until ' +
-            'someone pointed out IPA only enters after 70 min.'];
+            ' was actually in the mobile phase at the point in the gradient where this peak eluted. ' +
+            'Untick anything that was not — an [ACN+IPA+H]⁺ assignment once survived review until ' +
+            'someone pointed out that IPA only enters near the end of the run.'];
           if (iso.a1pct != null) {
             const nC = countCarbons(units) + (obs.polarity === 'neg' ? carbonsInCarrier(pair) : 0);
             const pred = nC * ISO.C.a1;
@@ -1236,9 +1884,20 @@ function chemistryOk(counts, z, pol, rd, flags, atomic, nominal) {
   return true;
 }
 
+/* The A+1 a candidate formula should show AT THE PEAK THE USER MEASURED.
+   When interpretIsotopes resolved that peak to one nuclide, only that element
+   contributes to it; otherwise the peak is the whole unresolved cluster. */
+function a1Model(counts, iso) {
+  if (iso.a1nuclide) {
+    const i = ISO[iso.a1nuclide];
+    return (counts[iso.a1nuclide] || 0) * (i ? i.a1 : 0);
+  }
+  return isotopePct(counts)[0];
+}
+
 function isotopesOk(counts, iso) {
   if (iso.a1pct != null) {
-    const p1 = isotopePct(counts)[0];
+    const p1 = a1Model(counts, iso);
     const tol = Math.max(1.2, 0.3 * iso.a1pct) + 1.5;   // +1.5 pp for guard 3
     if (Math.abs(p1 - iso.a1pct) > tol) return false;
   }
@@ -1271,7 +1930,7 @@ function penaltyOf(counts, rd, iso, flags) {
   if (flags.indexOf('low-O phosphorus (phosphine-oxide-like exception)') >= 0) pen += 2.5;
   if (iso.a1pct != null) {
     const tol = Math.max(1.2, 0.3 * iso.a1pct) + 1.5;
-    pen += 0.8 * Math.abs(isotopePct(counts)[0] - iso.a1pct) / tol;
+    pen += 0.8 * Math.abs(a1Model(counts, iso) - iso.a1pct) / tol;
   }
   if (iso.a2pct != null) {
     const tol = Math.max(2.0, 0.4 * iso.a2pct) + 1.5;
@@ -1285,7 +1944,11 @@ function generateFormulas(obs, iso, maxResults) {
   const z = obs.charge, pol = obs.polarity;
   const target = targetAtomicMass(obs.mz, pol, z);
   const tol = obs.tol * z;
-  const caps = Object.assign({}, CAPS);
+  // GEN_CAPS, not the isotope bound: these exist to keep the enumeration below
+  // finite, and every one of them is also clipped by what the target mass can
+  // physically hold, so a light ion never enumerates counts it could not carry.
+  const caps = {};
+  for (const e in GEN_CAPS) caps[e] = Math.min(GEN_CAPS[e], maxAtomsInIon(e, target));
   let elements = BASE_ELEMENTS.slice();
   // isotope evidence decides which exotic elements are even on the table
   for (const e in iso.required) { if (elements.indexOf(e) < 0) elements.push(e); }
@@ -1299,7 +1962,11 @@ function generateFormulas(obs, iso, maxResults) {
     const ceiling = iso.a2pct + Math.max(2.0, 0.4 * iso.a2pct) + 1.5;
     for (const e of A2_WINDOW) if (ISO[e].a2 > ceiling) caps[e] = 0;
   }
-  if (iso.a1pct != null) {
+  // A+1 intensity bounds the carbon count only when the peak it was measured on
+  // is the carbon peak. Read off a resolved ²⁹Si or ³³S satellite it says
+  // nothing about carbon, and using it there would cap D5 at 32 carbons on the
+  // strength of a silicon measurement.
+  if (iso.a1pct != null && (!iso.a1nuclide || iso.a1nuclide === 'C')) {
     const ctol = Math.max(1.2, 0.3 * iso.a1pct) + 1.5;
     caps.C = Math.min(caps.C, Math.floor((iso.a1pct + ctol) / ISO.C.a1) + 1);
   }
@@ -1401,8 +2068,8 @@ function layerFormula(obs, iso) {
     if (unitResolution()) ev.push('you are in unit-resolution mode, where the window is fixed at ' +
       '± 0.5 Da however precisely the value is typed');
     const cav = ['To narrow this, give the m/z to four decimals (371.1012, not 371) — that alone ' +
-      'cuts the list by roughly two orders of magnitude. Then add the B+1 m/z and its intensity: ' +
-      'the 13C count fixes the carbon number, and the B+2 intensity settles S, Cl, Br, K and Si.'];
+      'cuts the list by roughly two orders of magnitude. Then add the B1 m/z and its intensity: ' +
+      'the 13C count fixes the carbon number, and the B2 intensity settles S, Cl, Br, K and Si.'];
     return [{
       identity: 'Formula generation cannot narrow this at ' + window,
       species: '', formula: '', calc: null, ppm: null, layer: 'formula',
@@ -1424,13 +2091,13 @@ function layerFormula(obs, iso) {
     if (iso.a2pct != null) ev.push('predicted A+2 (S/Cl/Br/K/Si window) ' + a2Window(c.counts).toFixed(1) +
       '% against your measured ' + iso.a2pct + '%');
     for (const e in iso.required) if (c.counts[e]) ev.push('carries the ' + e +
-      ' that the B+1/B+2 exact mass demanded');
+      ' that the B1/B2 exact mass demanded');
     for (const f of c.flags) ev.push('flagged: ' + f);
     const cav = [];
     if (total > cands.length) cav.push('This is one of the ' + cands.length + ' best-scoring of ' +
       total + ' compositions that fit the window — a ranking, not a shortlist of everything possible.');
     if (!iso.a1pct && !iso.a2pct) cav.push('No measured isotope intensities, so this is constrained by mass and ' +
-      'chemistry only. Entering B+1 and B+2 typically removes most of these candidates.');
+      'chemistry only. Entering B1 and B2 typically removes most of these candidates.');
     if (c.pen > 3) cav.push('chemically unusual for a background ion — treat as a long shot.');
     return {
       identity: named || ('composition ' + c.formula),
@@ -1451,7 +2118,7 @@ const REPEATS = [
   { name: 'PEG / ethoxylate', mass: 44.0262 },
   { name: 'PPG', mass: 58.0419 },
   { name: 'cyclic siloxane (PDMS)', mass: 74.0188 },
-  { name: 'CH₂ alkyl homologue', mass: 14.0157 }
+  { name: 'CH₂ alkyl homolog', mass: 14.0157 }
 ];
 
 /* ---------------------------------------------------- peak-list input parsing
@@ -1615,11 +2282,11 @@ function layerCompanion(obs, iso) {
   for (const rep of REPEATS) {
     const step = rep.mass / z;
     if (near(obs.mz + step) && near(obs.mz - step)) {
-      ev.push('your peak list contains neighbours at ±' + step.toFixed(4) +
+      ev.push('your peak list contains neighbors at ±' + step.toFixed(4) +
         ' — that is the ' + rep.name + ' repeat of ' + rep.mass.toFixed(4) +
         (z > 1 ? ' divided by the charge ' + z : '') + ', so this is a polymer envelope');
     } else {
-      checks.push('a ' + rep.name + ' envelope would put neighbours at ' +
+      checks.push('a ' + rep.name + ' envelope would put neighbors at ' +
         (obs.mz - step).toFixed(4) + ' and ' + (obs.mz + step).toFixed(4) +
         (z > 1 ? ' (repeat ' + rep.mass.toFixed(4) + ' ÷ ' + z + ')' : ''));
     }
@@ -1704,6 +2371,13 @@ function detailDrawer(rows, obs, key) {
   if (r[F.rmd]) line('Relative mass defect', r[F.rmd] + ' ppm');
   if (r[F.nnb]) line('Competing structures', r[F.nnb] + ' other known compounds within 5 ppm');
   if (r[F.ms2n]) line('MS2 availability', r[F.ms2n] + ' public spectra');
+  // The fourth MS2 state, and the quietest one: this row stands for a series, an
+  // oligomer envelope or an unassigned ion, so it has no single structure and no
+  // library was ever searched on it. Saying that is not the same as saying zero,
+  // and the card face stays clear of it -- see ms2Block.
+  if (ms2Facts(r).kind === 'silent')
+    line('MS2 fragments', 'not established — this row has no single resolved ' +
+      'structure to search a spectral library on');
   line('Notes', r[F.note]);
   const ladder = (r[F.fam] && r[F.spacing]) ? r[F.fam] : '';
   if (!n && !refs.length && !ladder) return null;
@@ -1729,9 +2403,13 @@ function detailDrawer(rows, obs, key) {
     det.append(l);
   }
   if (refs.length) {
+    // EVERY reference, never a slice and never an "and N more". A citation the
+    // reader cannot see is a citation that does not exist, and the count in the
+    // heading is the count of what is actually printed below it. Long lists
+    // scroll inside the drawer rather than being cut.
     const b = el('div', 'ev-block');
     b.append(el('div', 'ev-title', refs.length === 1 ? 'Source' : 'Sources (' + refs.length + ')'));
-    const ul = el('ul', 'ev-list');
+    const ul = el('ul', 'ev-list ref-list');
     refs.forEach(s => { const li = el('li'); li.append(refNode(s)); ul.append(li); });
     b.append(ul);
     det.append(b);
@@ -1796,29 +2474,79 @@ function explanationCard(x, obs) {
     c.append(d);
   }
   if (rows.length) {
+    // fragments before the provenance drawer: "what did it break into" is the
+    // next question after "what is it", and it is the one MS1 cannot answer
+    const frag = ms2Block(rows, obs, key + '|ms2');
+    if (frag) c.append(frag);
     const det = detailDrawer(rows, obs, key + '|det');
     if (det) c.append(det);
   }
   return c;
 }
 
+/* --------------------------------------------------------- worked examples
+   Every one of these is checkable rather than illustrative: the peak lists are
+   library entries at their published m/z, and the deltas are differences an
+   analyst is expected to recognize on sight. A chip fills the input and runs
+   it, so what the reader sees is the app's own answer, not a description of one.
+
+   The same affordance sits in the same place on all three tabs -- directly
+   under that tab's input -- which is also why the Find examples moved out of
+   the empty-results card: on that tab they used to vanish the moment a search
+   returned anything, exactly when a second example is most useful. */
+const FIND_EXAMPLES = [
+  ['116.9286-', 'a chromate — and the reason A+1 is not only ¹³C'],
+  ['89.5069+', 'returns nothing if you assume 1+'],
+  ['112.9857-', 'two answers, and mass cannot separate them'],
+  ['371.1012+', 'cyclic siloxane D5'],
+  ['PEG', 'browse a family']
+];
+const LIST_EXAMPLES = [
+  ['PEG ladder', [129.0522, 173.0784, 217.1046, 261.1309, 305.1571, 349.1833, 393.2095],
+   'sodiated polyethylene glycol, seven oligomers 44.0262 apart'],
+  ['Siloxane ladder', [297.0824, 371.1012, 445.1200, 519.1388, 593.1576, 667.1764],
+   'cyclic polydimethylsiloxanes D4 to D9, 74.0188 apart'],
+  ['Plasticizer blank', [149.0233, 279.1591, 391.2843, 413.2662, 282.2791, 338.3417],
+   'the phthalate fragment at 149.0233, diisobutyl phthalate, DEHP as [M+H]⁺ and [M+Na]⁺, ' +
+   'and the slip agents oleamide and erucamide']
+];
+const DELTA_EXAMPLES = [
+  ['21.9819', '[M+Na]⁺ against [M+H]⁺'],
+  ['18.0106', 'water — hydrate, cluster or a neutral loss'],
+  ['44.0262', 'ethylene oxide — the PEG and ethoxylate repeat'],
+  ['58.0419', 'propylene oxide — the PPG repeat'],
+  ['74.0188', 'dimethylsiloxane — the PDMS repeat'],
+  ['1.00336', 'the ¹³C spacing, so the ion is singly charged']
+];
+
+function tryChip(label, title, action) {
+  const b = el('button', 'ghost-btn try-chip', label);
+  b.type = 'button';
+  b.title = title;
+  b.onclick = action;
+  return b;
+}
+
+function fillExamples() {
+  FIND_EXAMPLES.forEach(v => $('findExamples').append(tryChip(v[0], v[1], () => {
+    $('q').value = v[0]; run();
+  })));
+  LIST_EXAMPLES.forEach(v => $('listExamples').append(tryChip(v[0], v[2], () => {
+    $('peaklist').value = v[1].map(m => m.toFixed(4)).join('\n');
+    runPeakList();
+  })));
+  DELTA_EXAMPLES.forEach(v => $('deltaExamples').append(tryChip(v[0], v[1], () => {
+    $('d1').value = ''; $('d2').value = ''; $('dDelta').value = v[0];
+    runDelta();
+  })));
+}
+
 function showWelcome() {
   const box = $('cards'); box.textContent = '';
   const e = el('div', 'empty');
   e.append(el('h3', null, 'Start with the tallest peak of the cluster'));
-  e.append(el('p', null, 'Give it a polarity, and a charge if you know one. Try:'));
-  const ex = el('div', 'examples');
-  [['116.9286-', 'a chromate — and the reason A+1 is not only 13C'],
-   ['89.5069+', 'returns nothing if you assume 1+'],
-   ['112.9857-', 'two answers, and mass cannot separate them'],
-   ['371.1012+', 'cyclic siloxane D5'],
-   ['PEG', 'browse a family']].forEach(v => {
-    const b = el('button', 'ghost-btn', v[0]);
-    b.title = v[1];
-    b.onclick = () => { $('q').value = v[0]; run(); };
-    ex.append(b);
-  });
-  e.append(ex);
+  e.append(el('p', null, 'Give it a polarity, and a charge if you know one. ' +
+    'The “Try:” examples under the search box each run a real case.'));
   box.append(e);
 }
 
@@ -1883,14 +2611,49 @@ function searchText(q) {
 }
 
 /* ================================================================ main flow */
-function buildObservation(q) {
+/* The three intensity boxes hold ABSOLUTE intensities -- whatever the peak list
+   printed -- and the isotope engine speaks percent of base peak. The conversion
+   happens here, once, at the boundary: nothing downstream of this function
+   knows the input format changed.
+
+   The error path is deliberately loud. parseFloat('1,43e6') is 1, and a field
+   read as 1 (or as 0) is an isotope measurement the user never made, quietly
+   steering the whole identification. */
+function isotopePercents() {
+  const errs = [];
+  const read = (id, label) => {
+    const v = parseIntensity($(id).value);
+    $(id).setAttribute('aria-invalid', v === 'bad' ? 'true' : 'false');
+    if (v === 'bad') {
+      errs.push(label + ' intensity is not a number I can read. Write it as 1.43e6, 124000 or 1,240,000.');
+      return null;
+    }
+    return v;
+  };
+  const i0 = read('b0int', 'B0'), i1 = read('b1int', 'B1'), i2 = read('b2int', 'B2');
+  let base = i0;
+  if (base != null && !(base > 0)) {
+    errs.push('B0 intensity has to be greater than zero — every ratio on this panel is measured against it.');
+    base = null;
+  }
+  if (base == null && !errs.length && (i1 != null || i2 != null)) {
+    errs.push('B0 intensity is blank, so B1 and B2 cannot be turned into a ratio. ' +
+      'Put the base peak’s own height there, or 100 if you are entering percentages.');
+  }
+  const box = $('isoErr');
+  box.textContent = errs.join(' ');
+  box.hidden = !errs.length;
+  return { b1pct: pctOf(i1, base), b2pct: pctOf(i2, base), errors: errs };
+}
+
+function buildObservation(q, iso) {
   const obs = {
     mz: q.mz, decimals: q.decimals,
     polarity: q.polarity || $('polarity').value || 'pos',
     charge: q.charge, chargeGiven: q.charge != null,
-    b1mz: num('b1mz'), b1pct: num('b1pct'),
-    b2mz: num('b2mz'), b2pct: num('b2pct'),
-    below: $('belowB0').checked, rt: num('rtMin'), adduct: q.adduct
+    b1mz: num('b1mz'), b1pct: iso.b1pct,
+    b2mz: num('b2mz'), b2pct: iso.b2pct,
+    below: $('belowB0').checked, adduct: q.adduct
   };
   obs.b1decimals = ($('b1mz').value.split('.')[1] || '').length;
   obs.b2decimals = ($('b2mz').value.split('.')[1] || '').length;
@@ -1961,8 +2724,8 @@ function renderExplanations(obs, res) {
   if (obs.chargeInference) notes.push('Charge: ' + obs.chargeInference.why + '.');
   if (obs.chargeInference && obs.chargeInference.possible)
     notes.push('z = ' + obs.chargeInference.possible + ' is also possible; the fractional part alone cannot ' +
-      'assert a charge above 2. The B+1 m/z can.');
-  if (obs.chargeConflict) notes.push('Warning: the B+1 spacing says z = ' + obs.chargeConflict.z +
+      'assert a charge above 2. The B1 m/z can.');
+  if (obs.chargeConflict) notes.push('Warning: the B1 spacing says z = ' + obs.chargeConflict.z +
     ', not the ' + obs.charge + ' you specified.');
   if (!obs.polarityGiven) notes.push('No polarity given, so positive was assumed — add + or - to be sure.');
   if (obs.tol >= WIDE_WINDOW_DA) notes.push('This window is ± ' + obs.tol.toFixed(3) +
@@ -2002,7 +2765,7 @@ function renderExplanations(obs, res) {
   if (!list.length) {
     box.append(el('p', 'empty', 'No layer could explain this ion at ±' +
       obs.tol.toFixed(4) + ' Da. Widen the tolerance, check the polarity and charge, ' +
-      'or enter the B+1 m/z — it fixes the charge and names the element behind A+1.'));
+      'or enter the B1 m/z — it fixes the charge and names the element behind A+1.'));
   } else {
     const distinct = new Set(list.map(x => x.identity)).size;
     if (distinct > 1) {
@@ -2050,7 +2813,13 @@ function run() {
     history.replaceState(null, '',
       $('q').value ? '#' + encodeURIComponent($('q').value) : location.pathname);
   } catch (e) { /* file:// and some embeds disallow this; harmless */ }
+  // B0's m/z is the number in the search box -- one value, mirrored, never a
+  // second copy the user could contradict. The mirror is read-only for exactly
+  // that reason: with two editable fields holding the same quantity, one of
+  // them is always stale and the app cannot tell which.
+  $('b0mz').value = (q.mz != null && isFinite(q.mz)) ? q.mz : '';
   updateBadges();
+  const isoIn = isotopePercents();
 
   if (q.kind === 'empty') { $('status').textContent = ''; $('parseHint').textContent =
     'Type the m/z of the tallest peak in the cluster, with polarity and charge: 371+, 371 2+, 371(3+), 371 z=5, [M+H]+ 371.1012.';
@@ -2076,7 +2845,7 @@ function run() {
     return;
   }
 
-  const obs = buildObservation(q);
+  const obs = buildObservation(q, isoIn);
   $('parseHint').innerHTML = 'Base peak <code>' + obs.mz + '</code>, ' +
     (obs.polarity === 'pos' ? 'positive' : 'negative') + ', charge <code>' + obs.charge + '</code>' +
     (obs.chargeGiven ? '' : ' (inferred)') + ', ± ' +
@@ -2086,7 +2855,7 @@ function run() {
 
 /* ------------------------------------------------------------- peak list mode */
 /* Series spacing is divided by charge: a 3+ PEG envelope steps by 14.6754, and
-   an analyst staring at 14.68 will not recognise it as PEG unless told. */
+   an analyst staring at 14.68 will not recognize it as PEG unless told. */
 /* Tolerance for matching a SPACING. A spacing is a difference of two measured
    masses, so it carries both peaks' error -- but it is still a mass difference
    on a mass spectrometer, not a free parameter. */
@@ -2098,20 +2867,20 @@ function seriesTol(step) {
   if (unitResolution()) return 0.4;
   // High resolution. The old window was step * 0.002 -- 2000 ppm, +-0.148 Da on
   // a 74 Da repeat. That is 1.3x the ENTIRE 0.1165 Da gap between the siloxane
-  // and CH2 repeats, so every alkyl homologue ladder was reported as PDMS.
+  // and CH2 repeats, so every alkyl homolog ladder was reported as PDMS.
   //
   // Floor of 0.0025 Da: 10 ppm of a 44.0262 ethoxylate step is only 0.44 mDa,
   // tighter than a real difference of two centroids, so a ppm-only rule would
   // miss genuine low-mass ladders. Two peak positions each good to ~1 mDa
   // (routine for a centroided Orbitrap peak; a peak list quoted to 4 decimals
-  // adds +-0.05 mDa of quantisation) subtract to ~1.4 mDa, so 0.0025 Da is a
+  // adds +-0.05 mDa of quantization) subtract to ~1.4 mDa, so 0.0025 Da is a
   // ~2-sigma allowance. It is 59x tighter than the old window and still 23x
   // smaller than the 0.1165 Da separation this detector has to preserve.
   const floor = 0.0025;
   const mode = $('tolMode') ? $('tolMode').value : 'auto';
   const val = parseFloat($('tolValue') ? $('tolValue').value : '');
   if (mode === 'ppm' && val > 0) return Math.max(step * val / 1e6, floor);
-  // A user-set Da window is honoured, but capped at 0.05: half the gap between
+  // A user-set Da window is honored, but capped at 0.05: half the gap between
   // the repeats above is 0.058 Da, so a wider spacing window could not tell
   // them apart at all and would reinstate the defect this replaces.
   if (mode === 'da' && val > 0) return Math.min(Math.max(val, floor), 0.05);
@@ -2361,7 +3130,12 @@ function runDelta() {
     const t = el('div', 'card-top');
     t.append(el('span', 'card-mz', f[1].toFixed(4)));
     t.append(el('span', 'card-name', f[0]));
-    t.append(el('span', 'delta', (f[1] - d >= 0 ? '+' : '') + (f[1] - d).toFixed(4) + ' from yours'));
+    // "-0.0000 from yours" is what a rounded-away negative looks like, and it
+    // reads as a disagreement the numbers do not contain. Below half a tenth of
+    // a millidalton there is nothing to report but the match itself.
+    const off = f[1] - d;
+    t.append(el('span', 'delta', Math.abs(off) < 5e-5 ? 'exact'
+      : (off > 0 ? '+' : '') + off.toFixed(4) + ' from yours'));
     c.append(t);
     c.append(el('p', 'why', f[2]));
     box.append(c);
@@ -2373,8 +3147,10 @@ function updateBadges() {
   const refineOn = $('polarity').value || $('category').value || $('onlyMs2').checked ||
     $('onlyMulti').checked || $('tolMode').value !== 'auto' || $('sortBy').value !== 'blend';
   const moreOn = $('charge').value || $('isoPreset').value || $('elution').value || $('requireLogp').checked;
-  const isoOn = $('b1mz').value || $('b1pct').value || $('b2mz').value || $('b2pct').value ||
-    $('belowB0').checked || $('rtMin').value;
+  // b0int is excluded on purpose: it ships holding 100 and, on its own, changes
+  // nothing. The block is "on" once a satellite peak has actually been entered.
+  const isoOn = $('b1mz').value || $('b1int').value || $('b2mz').value || $('b2int').value ||
+    $('belowB0').checked;
   $('refineBadge').hidden = !refineOn; $('refineBadge').textContent = 'on';
   $('moreBadge').hidden = !moreOn; $('moreBadge').textContent = 'on';
   $('isoBadge').hidden = !isoOn; $('isoBadge').textContent = 'on';
@@ -2400,7 +3176,7 @@ function init() {
 
   ['tolMode', 'tolValue', 'resolution', 'polarity', 'category', 'sortBy', 'onlyMs2', 'onlyMulti',
    'charge', 'isoPreset', 'isoM1', 'isoM2', 'elution', 'requireLogp',
-   'b1mz', 'b1pct', 'b2mz', 'b2pct', 'belowB0', 'rtMin']
+   'b0int', 'b1mz', 'b1int', 'b2mz', 'b2int', 'belowB0']
     .forEach(id => $(id).addEventListener('change', () => {
       if (id === 'tolMode') {
         const auto = $('tolMode').value === 'auto';
@@ -2420,6 +3196,16 @@ function init() {
     $('isoCustom').hidden = true; run();
   };
   ['find', 'list', 'delta'].forEach(t => $('tab-' + t).onclick = () => switchTab(t));
+  fillExamples();
+  // The B0 m/z mirror is read-only: the base peak has exactly one home, the
+  // search box, so the two can never disagree. Tabbing THROUGH it must still
+  // work normally, so only an actual attempt to type in it forwards the user
+  // to the field that owns the value.
+  $('b0mz').addEventListener('keydown', e => {
+    if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault(); $('q').focus(); $('q').select();
+    }
+  });
 
   const saved = localStorage.getItem('theme');
   if (saved) document.documentElement.setAttribute('data-theme', saved);

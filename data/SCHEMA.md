@@ -4,10 +4,10 @@ This file is the column contract for two different things, and they do not use t
 convention for a missing value:
 
 * the **part files** the compendium is built from -- 18 columns, `NA` for unknown;
-* the **published table** `data/contaminants.tsv` -- 45 columns, an **empty field** for unknown.
+* the **published table** `data/contaminants.tsv` -- 47 columns, an **empty field** for unknown.
 
 Part files are what a contributor writes; `contaminants.tsv` is what a reader cites. See
-[Published artefacts](#published-artefacts) for the published columns.
+[Published artifacts](#published-artifacts) for the published columns.
 
 ## Part files (input)
 
@@ -94,9 +94,11 @@ row. Rows that reach that marker are flagged `reference_unresolved` in `qc_flags
 the QC report. The scrub is repeated in `clean_field()`, the single choke point every output row
 passes through, and the build fails loudly if a path survives into any written file.
 
-Merged references are capped at 2000 characters, but only ever on a ` || ` boundary -- a
-mid-string chop once left half a file path in the table. Dropped entries are announced as
-`(+N more)`.
+Merged references are **not truncated**. They were, twice: a blind 2000-character chop that
+bisected entries mid-path, and then a boundary-safe cap that dropped the overflow behind a
+`(+N more)` marker. Both lost information a reader needs, because a reference list that cannot be
+checked in full cannot be checked at all. Every distinct reference behind a row is now present in
+the field, however long that makes it -- the longest is around 4,900 characters.
 
 ## Ion identity: what makes two rows the same row
 
@@ -124,9 +126,9 @@ observed before predicted, m/z recomputed before m/z merely reported, higher con
 standard adduct notation, fewer QC flags, longer notes. Confidence takes the best value in the
 group; a category disagreement is surfaced as `merged_category_conflict:...` in `qc_flags`.
 
-## Published artefacts
+## Published artifacts
 
-`data/contaminants.tsv` is the merged, m/z-resolved table: **45 columns, 5,964 rows, one row
+`data/contaminants.tsv` is the merged, m/z-resolved table: **47 columns, 5,964 rows, one row
 per unique ion**, tab-separated, UTF-8, no quoting and no escape character (no field contains a
 tab, newline or `"`). It is the merged master (`output/contaminants_master_<ts>.tsv` in the
 private pipeline -- its 18 part columns plus the computed mass, ladder, provenance and
@@ -160,10 +162,10 @@ sodium row and is never treated as a placeholder in any column.
 | 1 | `mz` | m/z of the ion, 4 dp. Empty for the 30 rows we hold no mass for. Recomputed from formula + adduct when `mz_basis` = `calculated_from_formula` |
 | 2 | `polarity` | `pos` or `neg` |
 | 3 | `charge` | absolute charge, `1`-`6` |
-| 4 | `contaminant_name` | preferred name of the NEUTRAL contaminant this ion is presented as coming from |
+| 4 | `contaminant_name` | preferred name of the NEUTRAL contaminant this ion is presented as coming from. Where several source records merged into one ion, this is the name of the single record that won the display slot — see *How the displayed name is chosen* below |
 | 5 | `adduct` | ion species in the canonical notation (`canonical_adduct()`); empty where no adduct could be assigned |
 | 6 | `neutral_formula` | Hill-notation formula of the neutral molecule; empty where none is known |
-| 7 | `ion_formula` | Hill-notation composition of the ION -- the merge key. Isotope-labelled adduct terms are bracketed (`C2H3[63Cu]N`) |
+| 7 | `ion_formula` | Hill-notation composition of the ION -- the merge key. Isotope-labeled adduct terms are bracketed (`C2H3[63Cu]N`) |
 | 8 | `neutral_mono_mass` | monoisotopic mass of `neutral_formula`, 6 dp |
 | 9 | `category` | one of the controlled vocabulary terms above |
 | 10 | `series_name` | homologous/polymer series this compound belongs to, as named by the source (`PEG`, `Triton X`, `Tween 60`) |
@@ -183,7 +185,7 @@ sodium row and is never treated as a placeholder in any column.
 | 24 | `ladder_family_members` | `;`-separated m/z of every sibling in the family |
 | 25 | `common_source` | where it comes from, short phrase |
 | 26 | `synonyms` | `;`-separated alternate names, including every other name the merge folded in |
-| 27 | `rt_behavior` | chromatographic behaviour where known (`void volume`, `elutes late/lipophilic`) |
+| 27 | `rt_behavior` | chromatographic behavior where known (`void volume`, `elutes late/lipophilic`) |
 | 28 | `notes` | diagnostic detail: characteristic fragments, when it appears, how to remove it. Merged rows join their notes with ` \| ` |
 | 29 | `mz_basis` | `calculated_from_formula` (4,810) - recomputed here; `reported_only` (1,124) - the source's value, not independently recomputed; `none` (30) - no m/z at all |
 | 30 | `confidence` | `high` / `medium` / `low`; the best value in a merged group |
@@ -193,15 +195,17 @@ sodium row and is never treated as a placeholder in any column.
 | 34 | `n_records` | how many source records merged into this row |
 | 35 | `provenance` | `memory`, `web` or `memory+web` |
 | 36 | `source_types` | `;`-separated `source_type` values of the merged records |
-| 37 | `references` | ` \|\| `-separated citations, capped at 2000 characters on a separator boundary, never a local path |
+| 37 | `references` | ` \|\| `-separated citations. **Not truncated** -- every distinct reference behind the row is present, so the list can be checked in full. Never a local path |
 | 38 | `record_ids` | `;`-separated `record_id` of every merged source record |
 | 39 | `qc_flags` | `;`-separated build flags, see below |
 | 40 | `n_distinct_sources` | how many **distinct primary sources** stand behind the row, after mirrors and re-encodings of one dataset collapse to one, see below |
 | 41 | `n_ms2_spectra` | how many public MS2 spectra this ion's compound has, see below |
-| 42 | `ms2_licence_tier` | whether those spectra may be redistributed, see below |
-| 43 | `ms1_specificity_tier` | how far the m/z alone goes towards an identification, see below |
+| 42 | `ms2_license_tier` | whether those spectra may be redistributed, see below |
+| 43 | `ms1_specificity_tier` | how far the m/z alone goes toward an identification, see below |
 | 44 | `pubchem_cid` | PubChem CID of the NEUTRAL compound, resolved by full InChIKey; empty where none, see below |
 | 45 | `inchikey_skeleton` | 14-character InChIKey skeleton of the compound; the key of its 2D depiction, see below |
+| 46 | `n_ms2_records` | how many individually accessioned public MS2 records are listed for this compound in `ms2/<inchikey_skeleton>.json`, see below |
+| 47 | `n_ms2_peaklists` | how many of those records ship an actual peak list here rather than only a link, see below |
 
 `qc_flags` vocabulary: `no_formula`, `no_adduct`, `no_mz`, `bad_adduct`,
 `adduct_loss_exceeds_molecule`, `mz_out_of_lc_ms_range`, `reported_is_nominal`,
@@ -210,6 +214,35 @@ sodium row and is never treated as a placeholder in any column.
 `reference_unresolved`, `merged_category_conflict:<other categories>`. Flags are the union
 over the merged records, so `no_formula` can appear on a row that does carry a formula: it
 means one of the records behind the row had none.
+
+### How the displayed name is chosen
+
+An ion is often described by several source records at once — 1,843 of the 5,964 rows
+merge more than one, and 1,654 carry more than one compound name. Merging keeps every
+one of them (`alt_names`, `synonyms`, `alt_adducts`, `references`); nothing is discarded.
+What has to be decided is which single record fills the **display slot**, so that
+`contaminant_name`, `neutral_formula` and `adduct` stay a chemically coherent triple
+rather than being assembled field by field from different chemistry.
+
+Records are ranked on, in order: observation over prediction; whether the m/z is
+calculated from a formula; confidence; how standard the adduct notation is; whether the
+"neutral" is a **pseudo-neutral** (a composition with the loss already removed or the
+multimer already multiplied in — correct data, but it names nothing that exists, so it
+does not get to be the displayed identity); the number of QC flags; and then a series of
+name-specificity tests — a name that says *which* oligomer it is beats one that does not,
+a spelled-out identity beats a bare acronym, a name another candidate strictly contains
+is strictly poorer, and a name most source records agree on wins over a lone variant.
+
+**The final key is `record_id`, and it is a deterministic last resort, not a quality
+judgment.** Roughly a third of merged rows reach it: every key that carries meaning has
+tied, the candidates are genuinely indistinguishable on the evidence in the table, and
+something has to decide so that the same inputs always produce the same table. A lower
+`record_id` does not mean a better record. Where this matters to you, read `alt_names` —
+the names that did not win are all still there.
+
+Nothing in this ranking is a length or text-volume proxy. An earlier version ended in the
+character count of the `notes` field; a routine spelling edit that shortened one record by
+two characters silently renamed 26 rows and flipped their `rt_behavior`.
 
 ### `n_distinct_sources` -- how many independent sources say this exists
 
@@ -239,7 +272,7 @@ Three kinds of entry are not citations and count zero: `internal-knowledge` (thi
 own memory-derived half -- a claim, not something a reader can resolve), the `(+N more)`
 truncation marker, and the local-only-source placeholder. The count is computed **before**
 `references` is truncated at 2,000 characters, so the 155 rows whose reference list overflows
-the cap are not penalised for being well attested.
+the cap are not penalized for being well attested.
 
 | `n_distinct_sources` | rows |
 |---|---|
@@ -292,7 +325,7 @@ distinct compounds.** Build the link as
 
 `struct/<inchikey_skeleton>.svg` in the published repo holds one depiction per distinct
 structure, drawn from the verified SMILES. They are theme-aware (strokes inherit the page's
-colour when the SVG is inlined; a `prefers-color-scheme` default applies when it is loaded
+color when the SVG is inlined; a `prefers-color-scheme` default applies when it is loaded
 standalone) and long saturated chains are drawn **condensed** as C<sub>n</sub>H<sub>m</sub>
 abbreviations, so a C22 fatty amide does not render as a hairline zig-zag. A depiction exists
 only where `inchikey_skeleton` is populated; there is no depiction inferred from a formula.
@@ -300,7 +333,7 @@ only where `inchikey_skeleton` is populated; there is no depiction inferred from
 ### The MS2 and MS1 evidence columns
 
 `n_ms2_spectra` is a **count of public MS2 spectra**, matched to the compound (any of its
-names, including `alt_names`) through a verified InChIKey and aggregated from the harmonised
+names, including `alt_names`) through a verified InChIKey and aggregated from the harmonized
 Spectraverse collection of GNPS, MSnLib, MS-DIAL, MoNA, RIKEN, MassBank, HMDB and FooDB.
 937 of 5,964 rows have one.
 
@@ -311,7 +344,7 @@ surfactants and oligomer envelopes with no single structure -- there was no stru
 on in the first place. An empty field says "this table links no MS2 to this ion", which is all
 that is actually known.
 
-`ms2_licence_tier` says whether those spectra may be redistributed. It is empty whenever
+`ms2_license_tier` says whether those spectra may be redistributed. It is empty whenever
 `n_ms2_spectra` is, and otherwise takes the **best** tier among the ion's spectra:
 
 | value | meaning |
@@ -323,7 +356,72 @@ that is actually known.
 The tier describes **licensing, not spectral quality**, and it is a property of the compound's
 spectra, not of this ion's adduct.
 
-`ms1_specificity_tier` says how far the accurate mass **on its own** goes towards an
+### `n_ms2_records` and `n_ms2_peaklists` -- the fragments you can actually reach
+
+`n_ms2_spectra` counts spectra in an aggregated library. That count is a census: the aggregate
+carries no per-record license and no upstream accession, so an individual spectrum inside it can
+be neither licensed nor cited. It tells you how much exists; it does not get you a spectrum.
+
+`n_ms2_records` counts something different and stronger: **individually accessioned public MS2
+records**, each fetched from a primary library that states its own license per record, each with
+a resolvable URL. They are listed in `ms2/<inchikey_skeleton>.json` beside this file.
+
+`n_ms2_peaklists` counts how many of those records ship their **peak list** here. The rest are
+pointer-only -- accession, metadata and a working link, no peaks -- because their license does
+not permit republication.
+
+| column | when empty | when `0` |
+|--------|-----------|----------|
+| `n_ms2_records` | no record was found, or the compound has no resolved structure to search on | never written |
+| `n_ms2_peaklists` | `n_ms2_records` is empty, so the question was never asked | records were found and **none** could be redistributed -- an established zero |
+
+A peak list ships only under a license that permits republication: `CC0`, `CC BY`, or
+`dl-de/by-2-0`. Share-alike (`CC BY-SA`, `CC BY-NC-SA`) is **not** shipped even though it permits
+redistribution, because this compendium is CC BY 4.0 and cannot carry a share-alike obligation
+onward. Non-commercial and no-derivatives records are never shipped. Every record in the file
+carries its own `license` string, and an empty one means **not established**, never unrestricted.
+
+#### `ms2/<INCHIKEY_SKELETON>.json`
+
+One file per compound, keyed on the same 14-character skeleton as `struct/<ikey>.svg`. Fetched
+lazily -- these are deliberately outside `contaminants.json`, which every visitor downloads.
+`ms2/index.json` maps `ikey` to `{n, p}` (records, records with peaks) so a caller can tell
+whether a file exists without provoking a 404.
+
+| key | meaning |
+|-----|---------|
+| `ikey` | the 14-character InChIKey skeleton this file is for |
+| `names` | compound names this compendium uses for that structure |
+| `n_records` | records listed in this file |
+| `n_with_peaks` | of those, how many carry a peak list |
+| `n_pointer_only` | of those, how many are link-only |
+| `n_records_found` | how many were found before the per-file caps were applied |
+| `peak_cap` | peaks kept per spectrum: the most intense N |
+| `truncated` | present only when records were found and not listed, and says how many |
+| `census` | `{spectraverse: N, note}` -- how many spectra the aggregate holds, counted but not shipped |
+| `spectra[]` | one object per record, below |
+
+| `spectra[]` key | meaning |
+|-----|---------|
+| `lib` | source library: `MassBank`, `GNPS` or `MoNA` |
+| `acc` | that library's accession |
+| `url` | resolvable link to the original record. Always present |
+| `license` | the record's own license string; `""` means not established |
+| `license_url` | link to the license text, present only for the shippable licenses |
+| `pol` | `positive` or `negative`; absent when the record does not state it |
+| `adduct`, `prec`, `ce`, `inst` | precursor type, precursor m/z, collision energy, instrument, each absent when unstated |
+| `npeaks` | peak count in the **original** record, before capping |
+| `peaks` | `[[m/z, relative intensity], ...]`, intensity as percent of the base peak, m/z ascending. **`null`** when the record is pointer-only |
+| `peaks_capped` | present and `true` when capping dropped peaks from that record |
+| `title` | the record's own title or compound name; often empty, and never used for matching |
+
+Matching is on the **14-character skeleton**, never the full InChIKey and never the compound
+name. Libraries store a different stereo layer than PubChem returns for a common name (oleamide
+has 0 spectra at its full key and 14 at the skeleton), and 29.4% of spectra in the aggregate have
+no compound name at all -- the only public MS2 for cyclic siloxane D5, one of the most common
+background ions in the whole compendium, is nameless.
+
+`ms1_specificity_tier` says how far the accurate mass **on its own** goes toward an
 identification, from the ion's mass defect and how crowded that mass is in known chemistry:
 
 | value | rows | meaning |
@@ -338,7 +436,7 @@ identification, from the ion's mass defect and how crowded that mass is in known
 web app loads. Shape:
 
 ```
-{ "fields": [...39 short keys...], "rows": [[...], ...], "meta": {...} }
+{ "fields": [...41 short keys...], "rows": [[...], ...], "meta": {...} }
 ```
 
 Each row is an array positionally matching `fields`. Three fields carry provenance and search
@@ -360,7 +458,7 @@ from the same join, so the two files always agree:
 | field | TSV column | note |
 |-------|-----------|------|
 | `ms2n` | `n_ms2_spectra` | integer; **`0`** here where the TSV is empty -- both are falsy, but JSON rows are fixed-length arrays and a number costs less than a null |
-| `ms2tier` | `ms2_licence_tier` | same vocabulary |
+| `ms2tier` | `ms2_license_tier` | same vocabulary |
 | `ms1tier` | `ms1_specificity_tier` | same vocabulary |
 
 Three more carry compound identity and the reference count, from that same join:
@@ -369,13 +467,15 @@ Three more carry compound identity and the reference count, from that same join:
 |-------|------|-----------|---------|
 | `cid` | integer or `null` | `pubchem_cid` | PubChem CID of the neutral compound. `null` -- not `0`, not `""` -- where unresolved, because a missing identifier is not an identifier. Link as `https://pubchem.ncbi.nlm.nih.gov/compound/<cid>` |
 | `nref` | integer | `n_distinct_sources` | distinct primary sources after collapsing, `0` where none. Always present |
+| `ms2rec` | integer | `n_ms2_records` | accessioned public MS2 records listed in `ms2/<ikey>.json`; `0` here where the TSV is empty |
+| `ms2pk` | integer | `n_ms2_peaklists` | of those, how many ship a peak list; `0` where none do, and also where `ms2rec` is `0` |
 | `ikey` | string | `inchikey_skeleton` | 14-character InChIKey skeleton, `""` where the compound has no verified structure. The depiction is `struct/<ikey>.svg` -- build that path only when `ikey` is non-empty |
 
 New fields are appended to the END of `fields`, and the app reads optional columns by name, so a
 browser holding an older cached bundle still loads.
 
 `meta.refTable` is an array of distinct reference strings. Reference text is interned because it
-is highly repetitive -- 772 distinct strings across ~9,200 row-level occurrences -- so inlining
+is highly repetitive -- 795 distinct strings across ~10,700 row-level occurrences -- so inlining
 them would add ~1.9 MB to a bundle every visitor downloads, against ~0.3 MB interned. `syn` and
 `rid` are stored as plain strings: their values are near-unique per row, so interning them would
 buy little and cost the app an indirection. Rows whose `mz` is empty are omitted from the bundle,
